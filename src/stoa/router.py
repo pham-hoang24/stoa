@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 
-from .answer import Answer
+from .answer import ABSTAIN_DEFER, Answer
 from .data import Question
 
 # lane name -> module under stoa.lanes (imported lazily: ifcopenshell/ezdxf are heavy)
@@ -25,15 +25,11 @@ def _lane_module(lane: str):
     return importlib.import_module(f".lanes.{LANE_MODULES[lane]}", __package__)
 
 
-def _ifc_needs_llm(q: Question, a: Answer) -> bool:
-    return a.value is None and (q.type == "text" or "ifc_bench" in q.path or "not recognised" in a.note)
-
-
 def answer(q: Question) -> Answer:
     lane = lane_for(q)
     try:
         a = _lane_module(lane).answer(q, q.abspath)
-        if lane == "ifc" and _ifc_needs_llm(q, a):
+        if a.value is None and a.abstain == ABSTAIN_DEFER:
             return _lane_module("doc").answer(q, q.abspath)
         return a
     except Exception as e:  # a lane crash must never kill a batch run
