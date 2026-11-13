@@ -9,8 +9,7 @@ MEP component/system inventories, and live-load data availability.
 Unsupported questions defer to the existing LLM path. Recognized questions
 with missing attributes, ambiguous scope, incomplete area quantities, or
 unassigned MEP system classification decline. This distinction depends on the
-typed-abstention contract in #19 (PR #23); integrate that dependency before
-enabling the public text path.
+typed-abstention contract from #19 (merged PR #23).
 
 ## Evidence and limits
 
@@ -104,13 +103,11 @@ evaluation was performed.
 
 ### Integration validation
 
-The existing router and Answer contract from the pending #19 branch were
-copied into a temporary source tree, alongside this implementation. Router
-tests verify that absent usage cannot reach an LLM and unsupported templates
-still can. The rest of the repository was left unchanged.
+The initial integration check used the pending #19 contract in a temporary
+source tree. After PR #23 merged, this branch was rebased onto the real typed
+contract and tested there. Router tests verify that absent usage cannot reach
+an LLM and unsupported templates still can.
 
-The complete test suite passes against that combined interface. `make check`
-also passes: Swiss 99.2% on 2,358 questions and IFC models 97.6% on 1,049,
-unchanged from #12. Public integration must be revalidated on main after #19
-lands; these are dependency-integration results, not a claim that #19 is
-already merged.
+`make check` passes: Swiss 99.2% on 2,358 questions and IFC models 97.6% on
+1,049, unchanged from #12. Text-grader scores are reported separately from
+these numeric regression gates.

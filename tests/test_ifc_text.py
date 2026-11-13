@@ -1,4 +1,4 @@
-"""Independent IFC fixtures, with optional router checks against the #19 contract."""
+"""Independent IFC fixtures and router checks for deterministic text answers."""
 import ifcopenshell
 import ifcopenshell.api.unit
 import pytest
@@ -137,11 +137,29 @@ def test_mep_counts_do_not_infer_system_type_from_names(model):
 def test_explicit_system_membership_is_counted(model):
     f, _, _, _, ask = model
     terminal = f.create_entity("IfcAirTerminal", GlobalId=ifcopenshell.guid.new(), Name="Terminal")
-    system = f.create_entity("IfcSystem", GlobalId=ifcopenshell.guid.new(), Name="Supply")
+    system = f.create_entity("IfcSystem", GlobalId=ifcopenshell.guid.new(), Name="Supply", ObjectType="VENTILATION")
     f.create_entity("IfcRelAssignsToGroup", GlobalId=ifcopenshell.guid.new(),
                     RelatedObjects=[terminal], RelatingGroup=system)
     a = ask("How many MEP components are there by system type?")
     assert "System Supply: 1 components" in a.value
+    assert "System Type VENTILATION: 1 components" in a.value
+
+
+def test_system_names_do_not_establish_system_types(model):
+    f, _, _, _, ask = model
+    terminal = f.create_entity("IfcAirTerminal", GlobalId=ifcopenshell.guid.new())
+    system = f.create_entity("IfcSystem", GlobalId=ifcopenshell.guid.new(), Name="Heating")
+    f.create_entity("IfcRelAssignsToGroup", GlobalId=ifcopenshell.guid.new(),
+                    RelatedObjects=[terminal], RelatingGroup=system)
+    a = ask("How many MEP components are there by system type?")
+    assert a.value is None and "names are not treated as system types" in a.note
+
+
+def test_all_level_inventory_does_not_drop_unassigned_spaces(model):
+    f, _, _, _, ask = model
+    f.create_entity("IfcSpace", GlobalId=ifcopenshell.guid.new(), Name="Orphan")
+    a = ask("List the names of all rooms across all levels")
+    assert a.value is None and "incomplete inventory" in a.note
 
 
 def test_unsupported_semantic_or_multi_operation_questions_defer(model):
@@ -176,7 +194,6 @@ def test_repeated_metadata_requests_reuse_the_parsed_model(model, monkeypatch):
     assert len(calls) == 1
 
 
-@pytest.mark.skipif("abstain" not in Answer.__dataclass_fields__, reason="requires #19 typed-abstention contract")
 def test_router_does_not_fallback_for_missing_attributes(model, monkeypatch):
     _, building, _, save, _ = model
     building.ObjectType = None
@@ -186,10 +203,36 @@ def test_router_does_not_fallback_for_missing_attributes(model, monkeypatch):
     assert a["value"] is None and a["abstain"] == "declined"
 
 
-@pytest.mark.skipif("abstain" not in Answer.__dataclass_fields__, reason="requires #19 typed-abstention contract")
 def test_router_defers_only_unsupported_text(model, monkeypatch):
     _, _, _, save, _ = model
     save()
     monkeypatch.setattr(llm, "answer", lambda *args: Answer("fallback", lane="llm"))
     a = cli.ask("data/ifc_bench/custom.ifc", "Estimate embodied carbon")
     assert a["value"] == "fallback" and a["lane"] == "llm"
+
+
+@pytest.mark.parametrize("filename,software,schema", [
+    ("ac20_arc.ifc", "ARCHICAD-64", "IFC4"),
+    ("digital_hub_arc.ifc", "Autodesk Revit 2019", "IFC4"),
+    ("fantasy_office_building_3_arc.ifc", "Autodesk Revit 2024", "IFC4"),
+    ("hitos_arc.ifc", "ArchiCAD 11.0", "IFC2X3"),
+])
+def test_real_software_metadata_is_answered_without_a_provider(filename, software, schema, monkeypatch):
+    path = f"data/ifc_bench/{filename}"
+    if not (data.ROOT / path).exists():
+        pytest.skip("preview model unavailable")
+    monkeypatch.setattr(cli, "ROOT", data.ROOT)
+    monkeypatch.setattr(llm, "answer", lambda *args: pytest.fail("metadata must be deterministic"))
+    a = cli.ask(path, "What software and modeling standards were used?")
+    assert a["lane"] == "ifc" and software in a["value"] and schema in a["value"]
+    assert a["evidence"] and all(e["file"].endswith(filename) for e in a["evidence"])
+
+
+def test_real_placeholder_capacity_is_a_terminal_abstention(monkeypatch):
+    path = "data/ifc_bench/duplex_arc.ifc"
+    if not (data.ROOT / path).exists():
+        pytest.skip("preview model unavailable")
+    monkeypatch.setattr(cli, "ROOT", data.ROOT)
+    monkeypatch.setattr(llm, "answer", lambda *args: pytest.fail("absent capacity must stay declined"))
+    a = cli.ask(path, "What is the live load capacity of the first floor?")
+    assert a["value"] is None and a["abstain"] == "declined" and a["lane"] == "ifc"

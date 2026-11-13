@@ -128,12 +128,15 @@ def _spaces(f, path, text):
     needs_area = "area" in text
     entities, lines, missing = [], [], []
     all_ids = set()
+    assigned_levels = collections.defaultdict(set)
     for level in sorted(levels, key=lambda e: (e.Elevation or 0, e.GlobalId)):
         spaces = sorted((e for e in ue.get_decomposition(level) if e.is_a("IfcSpace")),
                         key=lambda e: (e.Name or "", e.GlobalId))
         entities.append(level)
         entities.extend(spaces)
         all_ids.update(e.GlobalId for e in spaces)
+        for space in spaces:
+            assigned_levels[space.GlobalId].add(level.GlobalId)
         lines.append(f"{level.Name or level.GlobalId}: {len(spaces)} spaces")
         total = 0.0
         for space in spaces:
@@ -150,6 +153,14 @@ def _spaces(f, path, text):
         if needs_area:
             lines.append(f"{level.Name}: net area {total:.2f} m2" if not missing else f"{level.Name}: total unavailable")
     lines.insert(0, f"Total Spaces: {len(all_ids)}")
+    if any(len(ids) > 1 for ids in assigned_levels.values()):
+        return _reply(path, None, "IfcSpace storey assignments", entities,
+                      "ambiguous space assignment across multiple requested storeys")
+    if len(levels) == len(f.by_type("IfcBuildingStorey")):
+        unassigned = {e.GlobalId for e in f.by_type("IfcSpace")} - all_ids
+        if unassigned:
+            return _reply(path, None, "IfcSpace storey assignments", entities,
+                          f"incomplete inventory: {len(unassigned)} spaces have no requested storey assignment")
     if missing:
         return _reply(path, None, "IfcSpace inventory and explicit net area quantities", entities,
                       f"incomplete areas: {len(missing)} spaces lack explicit net quantities")
@@ -190,11 +201,25 @@ def _mep(f, path, text):
     if re.search(r"by system|system type|grouped|distribution|distributed|breakdown|quantitative", text) and len(assigned) != len(elements):
         return _reply(path, None, "IfcDistributionElement / explicit IfcSystem assignments", elements,
                       f"system classification unavailable for {len(elements) - len(assigned)} elements; no system types inferred")
+    by_type = collections.defaultdict(set)
+    if "system type" in text:
+        for system in systems:
+            if not by_system[system.id()]:
+                continue
+            kind = getattr(system, "PredefinedType", None)
+            if kind in (None, "NOTDEFINED", "USERDEFINED"):
+                kind = system.ObjectType
+            if not _present(kind):
+                return _reply(path, None, "explicit IfcSystem type attributes", systems,
+                              "system type is not available; names are not treated as system types")
+            by_type[str(kind)].update(by_system[system.id()])
     lines = [f"Total MEP Components: {len(elements)}", f"Explicit IfcSystem records: {len(systems)}"]
     for cls, count in sorted(collections.Counter(e.is_a() for e in elements).items()):
         lines.append(f"{cls}: {count}")
     for system in systems:
         lines.append(f"System {system.Name or system.GlobalId}: {len(by_system[system.id()])} components")
+    for kind, ids in sorted(by_type.items()):
+        lines.append(f"System Type {kind}: {len(ids)} components")
     lines.append("Counts cover this IFC file only; absence is not a claim about the constructed building.")
     return _reply(path, "\n".join(lines), "IfcDistributionElement inventory and explicit system assignments", [*systems, *elements])
 
