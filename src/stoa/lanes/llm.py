@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from pathlib import Path
 
 from ..answer import Answer, Evidence
@@ -19,6 +20,22 @@ REPO = Path(__file__).resolve().parents[3]
 CACHE = REPO / ".cache" / "llm"
 MODEL = os.environ.get("STOA_LLM_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
 BASE = os.environ.get("STOA_LLM_BASE_URL", "https://api.featherless.ai/v1")
+_USAGE = {"calls": 0, "cached": 0, "prompt_tokens": 0, "completion_tokens": 0}
+_LOCK = threading.Lock()
+
+
+def _count(**inc: int) -> None:
+    with _LOCK:
+        for k, v in inc.items():
+            _USAGE[k] += v
+
+
+def usage() -> str:
+    """One-line summary of provider use in this process (tokens are as reported by the provider)."""
+    u = _USAGE
+    return f"{u['calls']} calls, {u['cached']} cached, {u['prompt_tokens']}+{u['completion_tokens']} tokens"
+
+
 SYSTEM_DRAWING = "You are a careful construction drawing reader."
 
 
@@ -35,11 +52,14 @@ def chat(messages: list[dict], model: str = MODEL, max_tokens: int = 600, temper
     key = hashlib.sha256(json.dumps([model, messages, max_tokens, temperature], sort_keys=True).encode()).hexdigest()
     cf = CACHE / f"{key}.txt"
     if cf.exists():
+        _count(cached=1)
         return cf.read_text()
     _env()
     from openai import OpenAI
     client = OpenAI(base_url=BASE, api_key=os.environ["FEATHERLESS_API_KEY"], timeout=180)
     out = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+    u = getattr(out, "usage", None)
+    _count(calls=1, prompt_tokens=getattr(u, "prompt_tokens", 0) or 0, completion_tokens=getattr(u, "completion_tokens", 0) or 0)
     text = out.choices[0].message.content or ""
     CACHE.mkdir(parents=True, exist_ok=True)
     cf.write_text(text)

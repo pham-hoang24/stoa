@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..data import load_questions
+from ..lanes.llm import usage as llm_usage
 from ..router import answer, lane_for
 from .score import correct
 
@@ -27,10 +28,23 @@ class Tally:
     n: int = 0
     ok: int = 0
     abstain: int = 0
+    evidenced: int = 0  # answered with at least one evidence item (presence, not validity)
+    secs: float = 0.0
 
     @property
     def acc(self) -> float:
         return self.ok / self.n if self.n else 0.0
+
+    @property
+    def evidence_rate(self) -> float:
+        answered = self.n - self.abstain
+        return self.evidenced / answered if answered else 0.0
+
+
+def timed(q):
+    t = time.perf_counter()
+    ans = answer(q)
+    return ans, time.perf_counter() - t
 
 
 def split_of(path: str) -> str:
@@ -66,20 +80,23 @@ def main(argv=None) -> int:
         qs = [q for q in qs if q.question.startswith(("How", "What", "On sheet"))]
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(a.workers) as ex:
-        answers = list(ex.map(answer, qs))
-    for q, ans in zip(qs, answers):
+        results = list(ex.map(timed, qs))
+    for q, (ans, secs) in zip(qs, results):
         ok = correct(q.type, q.answer, ans.value)
-        for key in (("source", q.source), ("type", q.type), ("all", "all")):
+        for key in (("source", q.source), ("type", q.type), ("lane", ans.lane or "none"), ("all", "all")):
             t = stats[key]
             t.n += 1
             t.ok += ok
             t.abstain += ans.value is None
+            t.evidenced += ans.value is not None and bool(ans.evidence)
+            t.secs += secs
         if not ok:
             wrong.append((q, ans))
-        out.append({"path": q.path, "q": q.question, "truth": q.answer, "pred": ans.value, "ok": ok, "lane": ans.lane, "note": ans.note})
+        out.append({"path": q.path, "q": q.question, "truth": q.answer, "pred": ans.value, "ok": ok, "lane": ans.lane, "note": ans.note,
+                    "evidence": len(ans.evidence), "secs": round(secs, 3)})
     for (k, v), t in sorted(stats.items(), key=lambda x: (x[0][0] != "all", x[0])):
-        print(f"{k:7} {str(v):18} n={t.n:5} acc={t.acc:6.1%} abstain={t.abstain/t.n:6.1%}")
-    print(f"{time.time()-t0:.1f}s")
+        print(f"{k:7} {str(v):18} n={t.n:5} acc={t.acc:6.1%} abstain={t.abstain/t.n:6.1%} evidence={t.evidence_rate:6.1%} ms/q={1000*t.secs/t.n:7.1f}")
+    print(f"{time.time()-t0:.1f}s  llm: {llm_usage()}")
     for q, ans in wrong[: a.show_wrong]:
         print(f"WRONG {q.path.split('/')[-1][:32]} | {q.question[:90]} | truth={q.answer} pred={ans.value} {ans.note}")
     if a.dump:
