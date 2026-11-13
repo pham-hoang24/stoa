@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>Stoa verify</title>
+<style>
+body{font:14px system-ui;margin:0;display:grid;grid-template-columns:360px 1fr;height:100vh}
+aside{padding:12px;overflow:auto;border-right:1px solid #ccc}
+main{overflow:auto;position:relative;background:#eee}
+input,textarea,button{width:100%;box-sizing:border-box;margin:4px 0;font:inherit}
+.chip{display:block;padding:4px 6px;margin:2px 0;border:1px solid #bbb;border-radius:4px;cursor:pointer}
+.chip:hover{background:#ffe9a8}
+#ans{font-size:28px;font-weight:600;margin:8px 0}
+#stage{position:relative;display:inline-block}
+.box{position:absolute;border:2px solid #e11;background:rgba(255,0,0,.12);pointer-events:none}
+.box.hot{border-color:#06f;background:rgba(0,100,255,.25)}
+</style>
+<aside>
+<input id="file" list="files" placeholder="file (data/…)"><datalist id="files"></datalist>
+<textarea id="q" rows="3" placeholder="question"></textarea>
+<button id="go">Ask</button>
+<div id="ans"></div><div id="meta"></div><div id="ev"></div>
+</aside>
+<main><div id="stage"><img id="img"></div></main>
+<script>
+const $=id=>document.getElementById(id);let zoom=2,evs=[];
+fetch('/api/files').then(r=>r.json()).then(fs=>{$('files').innerHTML=fs.map(f=>`<option value="${f}">`).join('')});
+function draw(hot){document.querySelectorAll('.box').forEach(b=>b.remove());
+ evs.forEach((e,i)=>{if(!e.bbox)return;const[b0,b1,b2,b3]=e.bbox;const d=document.createElement('div');
+  d.className='box'+(i===hot?' hot':'');d.style.cssText=`left:${b0*zoom}px;top:${b1*zoom}px;width:${(b2-b0)*zoom}px;height:${(b3-b1)*zoom}px`;$('stage').appendChild(d)})}
+$('go').onclick=async()=>{
+ const file=$('file').value;$('ans').textContent='…';
+ const r=await fetch('/api/ask',{method:'POST',body:JSON.stringify({file,question:$('q').value})});const a=await r.json();
+ $('ans').textContent=a.value===null?'(abstain)':a.value+(a.unit?' '+a.unit:'');$('meta').textContent=`lane: ${a.lane} ${a.note||''}`;
+ evs=a.evidence||[];const pdf=evs.find(e=>e.file&&e.file.endsWith('.pdf'));const show=pdf?pdf.file:file;
+ const m=show.indexOf('data/');const rel=m>=0?show.slice(m):show;
+ const im=$('img');im.onload=()=>{zoom=+im.dataset.z||2;draw(-1)};
+ const res=await fetch('/api/render?file='+encodeURIComponent(rel));zoom=+res.headers.get('X-Zoom')||2;im.dataset.z=zoom;im.src=URL.createObjectURL(await res.blob());
+ $('ev').innerHTML=evs.slice(0,60).map((e,i)=>`<span class="chip" data-i="${i}">${e.label||e.global_id||'evidence'}</span>`).join('');
+ document.querySelectorAll('.chip').forEach(c=>c.onmouseenter=()=>draw(+c.dataset.i));
+};
+</script>

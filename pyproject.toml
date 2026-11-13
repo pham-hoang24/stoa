@@ -13,7 +13,7 @@ dependencies = [
   "pymupdf",
   "opencv-python",
   "numpy",
-  "anthropic",
+  "openai",
   "python-dotenv",
 ]
 

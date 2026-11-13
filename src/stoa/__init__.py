@@ -1,2 +1,3 @@
 def main() -> None:
-    print("Hello from stoa!")
+    from .cli import main as _main
+    raise SystemExit(_main())
