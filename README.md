@@ -1,62 +1,37 @@
-# agent-team-template
+# Stoa
 
-One pinned GitHub issue as a shared board for the team's coding agents.
-Every agent posts there when it finishes something or needs something, and
-tags the teammate it needs by GitHub username. Each agent waits for its own
-tag, so work can hand off between people's agents without anyone sending a
-text. Works with any agent that can run a shell command — the board script
-only needs `bash` and the GitHub CLI (`gh`).
+Answers quantity-takeoff questions about construction drawings ("how many doors on this floor?", "area of room 2.05?") and shows the evidence behind each answer. Built for the Junction 2026 challenge. Terms are defined in [GLOSSARY.md](GLOSSARY.md); design decisions are in [docs/adr](docs/adr).
 
-Based on the setup described at
-[The Hackathon Agent Board](https://marvelous-relative-5de.notion.site/hack).
+## How it works
 
-## Setup (about 5 minutes)
+The router picks a lane from the drawing's source and format. Each lane returns an `Answer` with a value (or abstains), a unit and evidence.
 
-1. Open a new issue from the **Message board** issue template
-   (`.github/ISSUE_TEMPLATE/message-board.md`) and pin it.
-2. If it isn't issue #1, every teammate runs `export BOARD_ISSUE=<number>`
-   (put it in your shell profile so it sticks).
-3. Fill in your team's GitHub logins and the owner table in `AGENTS.md`.
-4. Every teammate runs `gh auth login` once, then `tools/board whoami` to
-   check it's wired up.
+| Lane | Drawings | Method |
+|---|---|---|
+| `ifc` | `ifc_models`, `ifc_bench` | IfcOpenShell: quantities and spatial structure |
+| `swiss` | `swiss_dwellings` | Rules on the DXF sibling of each PDF, no LLM |
+| `vision` | `cubicasa5k` PNGs | Vision model; still uses dataset priors for some templates, to be removed as answer leakage (#7) |
+| `doc` | everything else | LLM over page text and renders (`lanes/llm.py`) |
 
-Claude Code picks the board up on its own through the hooks in
-`.claude/settings.json` — it checks for unread posts when a session starts
-and again on every prompt. Other agents should read `AGENTS.md` and run
-`tools/board unread` before each task (see AGENTS.md for the recommended
-loop).
+## Setup
 
-## Commands
+Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```
-tools/board post "[Sam's Claude] login page is done, @login2 the API route is ready"
-tools/board unread
-tools/board wait [--interval SECONDS] [--timeout SECONDS]
-tools/board read [-n N]
-tools/board whoami
+uv sync
+export STOA_DATASET=/path/to/junction-dataset   # defaults to ./dataset
+echo "FEATHERLESS_API_KEY=..." > .env           # only the llm and vision lanes need it
 ```
 
-## Requirements
+## Use
 
-- `bash`, `git`
-- GitHub CLI (`gh`), logged in (`gh auth login`)
-- Write access to this repo
+```
+stoa ask data/swiss_dwellings/<file>.pdf "How many doors are drawn on this floor plan?"
+stoa serve                                       # click-to-verify viewer on :8765
+python -m stoa.eval.run --lane swiss --show-wrong 20
+make check                                       # tests + no-LLM accuracy gate (needs the dataset)
+```
 
-## FAQ
+## Team
 
-**Will this hit GitHub's rate limit?** No. `tools/board wait` checks once
-every 30 seconds by default, and an idle check is one API call — about 120
-calls/hour per agent, against GitHub's 5,000/hour per logged-in account. If
-several agents share one GitHub account, slow it down with
-`tools/board wait --interval 60`.
-
-**Can the repo be private?** Yes. Every teammate just needs repo access and
-their own `gh auth login`.
-
-**What if two agents need the same file?** The agent that needs it asks on
-the board and waits for the owner, or the team lead, to hand it off. Only
-the team lead moves work between people (see `AGENTS.md`).
-
-**Does it only work with Claude Code?** No. The script only needs `bash` and
-`gh`, so any agent that can run a shell command can use it. Claude Code gets
-the automatic hooks on top of that.
+The team coordinates through one pinned GitHub issue, the board. See [AGENTS.md](AGENTS.md).
