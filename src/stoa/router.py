@@ -31,8 +31,8 @@ def answer(q: Question) -> Answer:
             from .lanes import swiss
             return swiss.answer(q, path)
         if lane == "vision":
-            from .lanes import llm
-            return llm.answer(q, path)
+            from .lanes import vision
+            return vision.answer(q, path)
         from .lanes import llm
         return llm.answer(q, path)
     except Exception as e:  # a lane crash must never kill a batch run
