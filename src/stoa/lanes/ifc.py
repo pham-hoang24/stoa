@@ -2,12 +2,13 @@
 
 Findings behind the choices (see docs/research/tooling-and-dataset.md):
 * spaces: Qto NetFloorArea if present, else footprint area of the geometry
-* walls/slabs: Qto sums; length qty is in project length unit, area/volume are already SI
+* walls/slabs: complete Qto sums using each quantity's unit or project unit type
 * counts: spatial decomposition of the storey filtered by IFC class
 """
 from __future__ import annotations
 
 import functools
+import math
 import re
 from pathlib import Path
 
@@ -17,9 +18,9 @@ import ifcopenshell.util.element as ue
 import ifcopenshell.util.shape as ushape
 import ifcopenshell.util.unit as uunit
 
-from ..answer import Answer, Evidence
+from ..answer import ABSTAIN_DECLINED, ABSTAIN_DEFER, Answer, Evidence
 from ..data import Question
-from ..qparse import has, norm, quoted
+from ..qparse import norm, quoted
 
 # multilingual stems (en, et, da, de, fi, sv, fr, it) -> IFC class
 ENTITY_WORDS = {
@@ -38,7 +39,6 @@ QTY_WORDS = {
     "volume": ("volume", "maht", "volumen", "tilavuus", "volym", "volume"),
     "area": ("area", "pind", "areal", "fläche", "pinta-ala", "yta", "surface", "superficie", "m²"),
 }
-TOTAL_WORDS = ("total", "kõigi", "samlede", "alle", "all ", "gesamt", "yhteensä", "toutes", "tutti")
 
 
 @functools.lru_cache(maxsize=4)
@@ -47,37 +47,44 @@ def _open(path: str):
 
 
 def resolve_ifc(p: Path) -> Path | None:
-    """ifc_models PDF/SVG floor plans were rendered from `<model>.ifc`."""
-    if p.suffix == ".ifc":
-        return p
-    stem = p.stem
-    cands = sorted(p.parent.glob("*.ifc"), key=lambda c: -len(c.stem))
-    for c in cands:
-        if stem.startswith(c.stem):
-            return c
-    return None
+    """Resolve an exact twin or the dataset's named plan/elevation/section.
+
+    An arbitrary filename prefix is not enough to identify a source model.
+    """
+    if p.suffix.lower() == ".ifc":
+        return p if p.is_file() else None
+    if not p.parent.is_dir():
+        return None
+    cands = [c for c in p.parent.iterdir() if c.is_file() and c.suffix.lower() == ".ifc"]
+    exact = [c for c in cands if c.stem == p.stem]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    stem = re.split(r"_plan-\d+(?:-|$)|_(?:elevation|section)-", p.stem, maxsplit=1)[0]
+    matches = [c for c in cands if c.stem == stem]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _storey(f, name: str):
     n = norm(name)
-    for s in f.by_type("IfcBuildingStorey"):
-        if norm(s.Name or "") == n or norm(s.LongName or "") == n:
-            return s
-    return None
+    matches = [s for s in f.by_type("IfcBuildingStorey")
+               if n and n in (norm(s.Name or ""), norm(s.LongName or ""))]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _scale(f, kind: str) -> float:
-    try:
-        return uunit.calculate_unit_scale(f, kind)
-    except Exception:
-        return 1.0
+    return uunit.calculate_unit_scale(f, kind)
 
 
-def _qto(el, names: tuple[str, ...]):
-    for _, props in ue.get_psets(el, qtos_only=True).items():
-        for n in names:
+def _qto(el, names: tuple[str, ...], unit_type: str):
+    sets = ue.get_psets(el, qtos_only=True)
+    for n in names:
+        for props in sets.values():
             if isinstance(props.get(n), (int, float)):
-                return float(props[n])
+                qto = el.file.by_id(props["id"])
+                quantity = next((q for q in qto.Quantities if q.Name == n), None)
+                unit = getattr(quantity, "Unit", None)
+                scale = uunit.get_unit_scale(unit) if unit else _scale(el.file, unit_type)
+                return float(props[n]) * scale
     return None
 
 
@@ -97,22 +104,22 @@ def _footprint(el) -> float | None:
 
 
 def space_area(f, sp) -> tuple[float | None, str]:
-    q = _qto(sp, ("NetFloorArea",))
-    if q is not None and q > 0:
-        return q * _scale(f, "AREAUNIT"), "Qto NetFloorArea"
+    q = _qto(sp, ("NetFloorArea",), "AREAUNIT")
+    if q is not None and math.isfinite(q) and q >= 0:
+        return q, "Qto NetFloorArea"
     a = _footprint(sp)
     return a, "footprint geometry"
 
 
 def _top(els, cls: str):
     """Drop parts aggregated into an element of the same class (ArchiCAD stairs are split into hundreds of IfcStair parts)."""
-    out = []
+    out = {}
     for e in els:
         parent = ue.get_aggregate(e)
         if parent is not None and parent.is_a(cls):
             continue
-        out.append(e)
-    return out
+        out.setdefault(e.GlobalId, e)
+    return sorted(out.values(), key=lambda e: e.GlobalId)
 
 
 def _in_storey(storey, cls: str):
@@ -136,92 +143,132 @@ def _entity(q: str) -> str | None:
     return best
 
 
+def _wording(q: str) -> str:
+    for label in quoted(q):
+        q = q.replace(label, " ")
+    return q
+
+
 def _qty(q: str) -> str:
-    ql = q.casefold()
+    ql = _wording(q).casefold()
     for k in ("side", "length", "volume", "area"):
         if any(w in ql for w in QTY_WORDS[k]):
             return k
     return "count"
 
 
+def _scope(question: str, qty: str):
+    """Interpret explicit model scope separately from a quoted storey/room.
+
+    Mask quoted labels before checking scope words: a floor called 'Model floor'
+    must not turn an unknown-storey question into a whole-model query.
+    """
+    quotes = quoted(question)
+    wording = _wording(question)
+    model = bool(re.search(r"\b(?:model(?:s|len|l|lo)?|mudeli[st]?|modèle|malli)\b", wording, re.I))
+    floor = bool(re.search(r"floor(?!\s+area)|storey|story|korrus|geschoss|etage|kerros|étage|piano", wording, re.I))
+    if model:
+        if floor or len(quotes) > 1:
+            return None, None, None, "ambiguous model/storey scope"
+        return "model", quotes[0] if quotes else "whole model", None, ""
+    if len(quotes) == 1:
+        return "storey", quotes[0], None, ""
+    if len(quotes) == 2 and qty == "area" and _entity(wording) in (None, "IfcSpace"):
+        return "room", quotes[1], quotes[0], ""
+    return None, None, None, "ambiguous scope: specify a model or a named storey"
+
+
+def _result(value, unit, path, scope, method, elements=(), note="") -> Answer:
+    """Keep source, scope and calculation method in the existing evidence contract."""
+    ev = [Evidence(str(path), f"{e.Name or e.is_a()}; scope={scope}; method={how}",
+                   global_id=e.GlobalId) for e, how in elements]
+    # Zero counts and abstentions still cite their source and interpreted scope.
+    if not ev:
+        ev = [Evidence(str(path), f"scope={scope}; method={method}")]
+    return Answer(value, unit, ev, "ifc", f"scope={scope}; method={method}" + (f"; {note}" if note else ""),
+                  abstain=None if value is not None else ABSTAIN_DECLINED)
+
+
 def answer(q: Question, path: Path) -> Answer:
+    from .ifc_overlay import attach
+
+    return attach(_answer(q, path), path)
+
+
+def _answer(q: Question, path: Path) -> Answer:
+    if q.type == "text" or "ifc_bench" in q.path:
+        return Answer(None, lane="ifc", note="free-form text handled by llm lane", abstain=ABSTAIN_DEFER)
+    qty = _qty(q.question)
+    kind, name, room, error = _scope(q.question, qty)
+    scope = f"{kind}: {name}" if kind else "unresolved"
+    if room:
+        scope += f"; room: {room}"
+    if error:
+        return _result(None, None, path, scope, "scope resolution", note=error)
     ifc = resolve_ifc(path)
     if ifc is None:
-        return _svg_answer(q, path)
+        # A floor SVG is a partial inventory. It cannot establish a complete
+        # model/storey count or a total quantity when the IFC is unavailable.
+        return _result(None, None, path, scope, "companion IFC resolution",
+                       note="no unique companion IFC; complete inventory unavailable")
     f = _open(str(ifc))
-    quotes = quoted(q.question)
-
-    if q.type == "text" or "ifc_bench" in q.path:
-        return Answer(None, lane="ifc", note="free-form text handled by llm lane")
-
-    # --- single room net area: two quotes (room, storey)
-    if len(quotes) >= 2:
-        room, storey_name = quotes[0], quotes[1]
-        st = _storey(f, storey_name)
+    cls = _entity(_wording(q.question))
+    if kind == "model":
+        if cls is None:
+            return _result(None, None, ifc, scope, "IFC inventory", note="unsupported entity")
+        els = _top(f.by_type(cls), cls)
+    else:
+        st = _storey(f, name)
         if st is None:
-            return Answer(None, lane="ifc", note=f"storey {storey_name!r} not found")
-        for sp in _in_storey(st, "IfcSpace"):
-            if norm(room) in space_label(sp):
-                a, how = space_area(f, sp)
-                return Answer(round(a, 3) if a is not None else None, "m2", [Evidence(str(ifc), f"{room} ({how})", global_id=sp.GlobalId)], "ifc")
-        return Answer(None, lane="ifc", note=f"room {room!r} not on {storey_name!r}")
-
-    if len(quotes) != 1:
-        return Answer(None, lane="ifc", note="cannot find storey in question")
-    st = _storey(f, quotes[0])
-    qty, cls = _qty(q.question), _entity(q.question)
-    if st is None:
-        if cls and qty == "count" and has(q.question, "model", "mudel", "modell", "modèle", "modello", "malli", "modellen"):  # quote is the model name
-            els = _top(f.by_type(cls), cls)
-            return Answer(len(els), "count", [Evidence(str(ifc), e.Name or "", global_id=e.GlobalId) for e in els[:200]], "ifc")
-        return Answer(None, lane="ifc", note=f"storey {quotes[0]!r} not found")
-
-    # "total net floor area of all rooms" -> area of spaces
-    if qty == "area" and cls in (None, "IfcSpace"):
-        tot, ev = 0.0, []
-        for sp in _in_storey(st, "IfcSpace"):
-            a, _ = space_area(f, sp)
-            if a:
-                tot += a
-                ev.append(Evidence(str(ifc), sp.Name or "", global_id=sp.GlobalId))
-        return Answer(round(tot, 3), "m2", ev, "ifc")
-    if cls is None:
-        return Answer(None, lane="ifc", note="entity not recognised")
-    els = _in_storey(st, cls)
+            return _result(None, None, ifc, scope, "storey lookup",
+                           note=f"storey {name!r} not found or not unique")
+        if kind == "room":
+            matches = [sp for sp in _in_storey(st, "IfcSpace") if norm(room) in space_label(sp)]
+            if len(matches) != 1:
+                return _result(None, "m2", ifc, scope, "room lookup",
+                               note=f"room {room!r} not found or not unique on {name!r}")
+            sp = matches[0]
+            value, how = space_area(f, sp)
+            if value is None or not math.isfinite(value) or value < 0:
+                return _result(None, "m2", ifc, scope, how, [(sp, how)], note="room area unavailable")
+            return _result(round(value, 3), "m2", ifc, scope, how, [(sp, how)])
+        if qty == "area" and cls is None:
+            cls = "IfcSpace"
+        if cls is None:
+            return _result(None, None, ifc, scope, "IFC inventory", note="unsupported entity")
+        els = _in_storey(st, cls)
     if qty == "count":
-        return Answer(len(els), "count", [Evidence(str(ifc), e.Name or "", global_id=e.GlobalId) for e in els[:200]], "ifc")
+        return _result(len(els), "count", ifc, scope, "IFC element inventory",
+                       [(e, "IFC element inventory") for e in els])
 
-    names = {"length": ("Length",), "side": ("NetSideArea", "GrossSideArea"), "volume": ("NetVolume", "GrossVolume"), "area": ("NetArea", "GrossArea")}[qty]
-    unit = {"length": "LENGTHUNIT", "side": "AREAUNIT", "volume": "VOLUMEUNIT", "area": "AREAUNIT"}[qty]
-    # prefer the Net* variant consistently; count how many elements had it
-    tot, ev = 0.0, []
+    unit = {"length": "m", "side": "m2", "volume": "m3", "area": "m2"}[qty]
+    unit_type = {"length": "LENGTHUNIT", "side": "AREAUNIT", "volume": "VOLUMEUNIT", "area": "AREAUNIT"}[qty]
+    names = {"length": ("Length",), "side": ("NetSideArea",),
+             "volume": ("NetVolume",), "area": ("NetArea",)}[qty]
+    total, evidence, missing = 0.0, [], []
     for e in els:
-        v = _qto(e, names[:1]) if qty != "length" else _qto(e, names)
-        if v is None and qty != "length":
-            v = _qto(e, names)
-        if v is None and qty == "volume":
-            try:
-                tot += ushape.get_volume(ifcopenshell.geom.create_shape(_settings(), e).geometry)
-                ev.append(Evidence(str(ifc), f"{e.Name} (geometry)", global_id=e.GlobalId))
-                continue
-            except Exception:
-                v = None
-        if v is not None:
-            tot += v * _scale(f, unit)
-            ev.append(Evidence(str(ifc), e.Name or "", global_id=e.GlobalId))
-    unit_s = {"length": "m", "side": "m2", "volume": "m3", "area": "m2"}[qty]
-    return Answer(round(tot, 3), unit_s, ev, "ifc")
-
-
-def _svg_answer(q: Question, path: Path) -> Answer:
-    """No IFC shipped (FZK): count element groups in the SVG twin of the floor plan (class="IfcXxx")."""
-    svg = path if path.suffix == ".svg" else path.with_suffix(".svg")
-    if not svg.exists():
-        return Answer(None, lane="ifc", note=f"no IFC or SVG for {path.name}")
-    cls, qty = _entity(q.question), _qty(q.question)
-    if cls is None or qty != "count":
-        return Answer(None, lane="ifc", note="svg fallback only counts elements")
-    names = {cls} | ({"IfcWallStandardCase"} if cls == "IfcWall" else set())
-    txt = svg.read_text(encoding="utf-8", errors="ignore")
-    n = sum(len(re.findall(rf'class="{c}"', txt)) for c in names)
-    return Answer(n, "count", [Evidence(str(svg), f"{cls} groups in SVG")], "ifc", "from SVG (no IFC)")
+        value, how = None, "quantity unavailable"
+        if qty == "area" and cls == "IfcSpace":
+            value, how = space_area(f, e)
+        else:
+            for key in names:
+                value = _qto(e, (key,), unit_type)
+                if value is not None:
+                    how = f"Qto {key} ({unit})"
+                    break
+            if value is None and qty == "volume":
+                try:
+                    value = ushape.get_volume(ifcopenshell.geom.create_shape(_settings(), e).geometry)
+                    how = "geometry volume (m3)"
+                except Exception:
+                    value = None
+        if value is None or not math.isfinite(value) or value < 0:
+            missing.append(e.GlobalId)
+        else:
+            total += value
+        evidence.append((e, how))
+    method = " + ".join(sorted({how for _, how in evidence})) or "empty IFC inventory"
+    if missing:
+        return _result(None, unit, ifc, scope, method, evidence,
+                       note=f"incomplete total: {len(missing)}/{len(els)} elements missing {qty}")
+    return _result(round(total, 3), unit, ifc, scope, method, evidence)

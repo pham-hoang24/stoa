@@ -1,8 +1,13 @@
 """Route a question to the lane that can answer it best (by source/format, not question type)."""
 from __future__ import annotations
 
-from .answer import Answer
+import importlib
+
+from .answer import ABSTAIN_DEFER, Answer
 from .data import Question
+
+# lane name -> module under stoa.lanes (imported lazily: ifcopenshell/ezdxf are heavy)
+LANE_MODULES = {"ifc": "ifc", "swiss": "swiss", "vision": "vision", "doc": "llm"}
 
 
 def lane_for(q: Question) -> str:
@@ -16,24 +21,16 @@ def lane_for(q: Question) -> str:
     return "doc"  # PDFs/DXF with text: schedules and free-form
 
 
+def _lane_module(lane: str):
+    return importlib.import_module(f".lanes.{LANE_MODULES[lane]}", __package__)
+
+
 def answer(q: Question) -> Answer:
     lane = lane_for(q)
-    path = q.abspath
     try:
-        if lane == "ifc":
-            from .lanes import ifc
-            a = ifc.answer(q, path)
-            if a.value is None and (q.type == "text" or "ifc_bench" in q.path or "not recognised" in a.note):
-                from .lanes import llm
-                return llm.answer(q, path)
-            return a
-        if lane == "swiss":
-            from .lanes import swiss
-            return swiss.answer(q, path)
-        if lane == "vision":
-            from .lanes import vision
-            return vision.answer(q, path)
-        from .lanes import llm
-        return llm.answer(q, path)
+        a = _lane_module(lane).answer(q, q.abspath)
+        if a.value is None and a.abstain == ABSTAIN_DEFER:
+            return _lane_module("doc").answer(q, q.abspath)
+        return a
     except Exception as e:  # a lane crash must never kill a batch run
         return Answer(None, lane=lane, note=f"error: {type(e).__name__}: {e}")
