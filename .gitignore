@@ -1,0 +1,7 @@
+.board/
+dataset
+.venv/
+__pycache__/
+*.pyc
+.env
+.cache/
