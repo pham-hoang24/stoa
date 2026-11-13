@@ -11,10 +11,15 @@ import json
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..data import load_questions
 from ..router import answer, lane_for
 from .score import correct
+
+
+BASELINE = Path(__file__).with_name("baseline.json")  # measured accuracy per --source (else --lane)
+TOLERANCE = 0.005
 
 
 @dataclass
@@ -42,6 +47,8 @@ def main(argv=None) -> int:
     ap.add_argument("--dump", help="write per-question jsonl here")
     ap.add_argument("--show-wrong", type=int, default=0)
     ap.add_argument("--min-acc", type=float, help="exit 1 if overall accuracy is below this (regression gate)")
+    ap.add_argument("--gate", action="store_true", help=f"exit 1 if accuracy is more than {TOLERANCE:.1%} under the recorded baseline for --source/--lane")
+    ap.add_argument("--update-baseline", action="store_true", help="record this run's accuracy as the baseline for --source/--lane")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--english", action="store_true", help="skip questions with non-ASCII-heavy translations (halves LLM cost)")
     a = ap.parse_args(argv)
@@ -82,6 +89,22 @@ def main(argv=None) -> int:
     if a.min_acc is not None and overall.n and overall.acc < a.min_acc:
         print(f"FAIL: accuracy {overall.acc:.1%} < {a.min_acc:.1%}")
         return 1
+    key = a.source or a.lane
+    if (a.gate or a.update_baseline) and not (key and overall.n):
+        print("FAIL: --gate/--update-baseline need --source or --lane and at least one question")
+        return 1
+    baselines = json.loads(BASELINE.read_text()) if BASELINE.exists() else {}
+    if a.update_baseline:
+        baselines[key] = round(overall.acc, 3)
+        BASELINE.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n")
+        print(f"baseline[{key}] = {baselines[key]:.1%}")
+    elif a.gate:
+        if key not in baselines:
+            print(f"FAIL: no baseline for {key!r}; run with --update-baseline first")
+            return 1
+        if overall.acc < baselines[key] - TOLERANCE:
+            print(f"FAIL: accuracy {overall.acc:.1%} < baseline {baselines[key]:.1%} - {TOLERANCE:.1%}")
+            return 1
     return 0
 
 
