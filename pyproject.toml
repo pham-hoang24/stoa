@@ -6,8 +6,16 @@ readme = "README.md"
 authors = [
     { name = "z0rhan", email = "uknowme1928@gmail.com" }
 ]
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+  "ifcopenshell",
+  "ezdxf",
+  "pymupdf",
+  "opencv-python",
+  "numpy",
+  "anthropic",
+  "python-dotenv",
+]
 
 [project.scripts]
 stoa = "stoa:main"

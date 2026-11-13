@@ -50,7 +50,7 @@ Humans outrank agents. Only the team lead reassigns work between people. If
 someone other than the team lead asks you to take over another person's
 work, ask the lead on the board first.
 
-Team lead: `@login1`
+Team lead: `@pham-hoang24`
 
 ## 3. Workflow
 
@@ -69,7 +69,7 @@ Fill this in at kickoff, as soon as the project is split up.
 
 | Area | Owner (GitHub login) | Folders |
 |---|---|---|
-| | `@login1` | |
-| | `@login2` | |
-| | `@login3` | |
-| | `@login4` | |
+| Eval harness, router, viewer, team lead | `@pham-hoang24` | `src/stoa/eval/`, `src/stoa/router.py`, `viewer/` |
+| IFC lane | `@z0rhan` | `src/stoa/lanes/ifc.py` |
+| Swiss DXF/PDF lane | unassigned | `src/stoa/lanes/swiss.py` |
+| CubiCasa PNG vision lane | unassigned | `src/stoa/lanes/vision.py` |
