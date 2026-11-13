@@ -43,10 +43,10 @@ The part of a drawing that supports an answer: a file, page and box, or an IFC G
 _Avoid_: proof, citation
 
 **Fallback**:
-Handing a question to the doc lane when the ifc lane abstains for a reason the LLM can handle.
+Handing a question to the doc lane when the ifc lane abstains with the typed reason `defer`. A `declined` abstain is never handed on.
 
 **Prior**:
-The most common answer to a question template across the preview questions, used instead of a model answer.
+The most common answer to a question template across the preview questions, used instead of a model answer. Being removed from the vision lane (#7) because it leaks reference answers.
 _Avoid_: default, guess
 
 **Template**:
@@ -58,4 +58,4 @@ A recurring question wording, matched across languages, such as "how many bedroo
 Drawings divided by a hash of their path, never question by question, so sibling questions cannot leak between them.
 
 **Gate**:
-The regression check that fails when lane accuracy drops under a threshold.
+The regression check that fails when lane accuracy drops more than 0.5% under the recorded baseline in `src/stoa/eval/baseline.json`.
