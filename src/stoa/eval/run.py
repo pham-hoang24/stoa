@@ -10,10 +10,22 @@ import hashlib
 import json
 import sys
 import time
+from dataclasses import dataclass
 
 from ..data import load_questions
 from ..router import answer, lane_for
 from .score import correct
+
+
+@dataclass
+class Tally:
+    n: int = 0
+    ok: int = 0
+    abstain: int = 0
+
+    @property
+    def acc(self) -> float:
+        return self.ok / self.n if self.n else 0.0
 
 
 def split_of(path: str) -> str:
@@ -40,7 +52,7 @@ def main(argv=None) -> int:
           and (a.split == "all" or split_of(q.path) == a.split)]
     if a.limit:
         qs = qs[: a.limit]
-    stats = collections.defaultdict(lambda: [0, 0, 0])  # n, ok, abstain
+    stats = collections.defaultdict(Tally)
     wrong, out = [], []
     t0 = time.time()
     if a.english:
@@ -51,13 +63,15 @@ def main(argv=None) -> int:
     for q, ans in zip(qs, answers):
         ok = correct(q.type, q.answer, ans.value)
         for key in (("source", q.source), ("type", q.type), ("all", "all")):
-            s = stats[key]
-            s[0] += 1; s[1] += ok; s[2] += ans.value is None
+            t = stats[key]
+            t.n += 1
+            t.ok += ok
+            t.abstain += ans.value is None
         if not ok:
             wrong.append((q, ans))
         out.append({"path": q.path, "q": q.question, "truth": q.answer, "pred": ans.value, "ok": ok, "lane": ans.lane, "note": ans.note})
-    for (k, v), (n, ok, ab) in sorted(stats.items(), key=lambda x: (x[0][0] != "all", x[0])):
-        print(f"{k:7} {str(v):18} n={n:5} acc={ok/n:6.1%} abstain={ab/n:6.1%}")
+    for (k, v), t in sorted(stats.items(), key=lambda x: (x[0][0] != "all", x[0])):
+        print(f"{k:7} {str(v):18} n={t.n:5} acc={t.acc:6.1%} abstain={t.abstain/t.n:6.1%}")
     print(f"{time.time()-t0:.1f}s")
     for q, ans in wrong[: a.show_wrong]:
         print(f"WRONG {q.path.split('/')[-1][:32]} | {q.question[:90]} | truth={q.answer} pred={ans.value} {ans.note}")
@@ -65,8 +79,8 @@ def main(argv=None) -> int:
         with open(a.dump, "w") as fh:
             fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in out)
     overall = stats[("all", "all")]
-    if a.min_acc is not None and overall[0] and overall[1] / overall[0] < a.min_acc:
-        print(f"FAIL: accuracy {overall[1]/overall[0]:.1%} < {a.min_acc:.1%}")
+    if a.min_acc is not None and overall.n and overall.acc < a.min_acc:
+        print(f"FAIL: accuracy {overall.acc:.1%} < {a.min_acc:.1%}")
         return 1
     return 0
 

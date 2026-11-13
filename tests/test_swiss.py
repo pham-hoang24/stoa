@@ -1,16 +1,14 @@
 """Seam: the Swiss lane through router.answer. Expected values are dataset ground truth (questions.jsonl), not recomputed."""
 import pytest
 
-from stoa.data import Question
-from stoa.router import answer
-from conftest import needs_data
+from conftest import ask as ask_about, needs_data
 
-F = "data/swiss_dwellings/site1000_bldg2082_floor9385.pdf"
+FLOOR = "data/swiss_dwellings/site1000_bldg2082_floor9385.pdf"
 pytestmark = needs_data
 
 
 def ask(text):
-    return answer(Question(path=F, question=text))
+    return ask_about(FLOOR, text)
 
 
 @pytest.mark.parametrize("text,expected", [
