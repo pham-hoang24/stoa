@@ -47,7 +47,7 @@ def _open(path: str):
 
 
 def resolve_ifc(p: Path) -> Path | None:
-    """Resolve an exact twin or the dataset's `<model>_plan-NN-...` companion.
+    """Resolve an exact twin or the dataset's named plan/elevation/section.
 
     An arbitrary filename prefix is not enough to identify a source model.
     """
@@ -59,7 +59,7 @@ def resolve_ifc(p: Path) -> Path | None:
     exact = [c for c in cands if c.stem == p.stem]
     if exact:
         return exact[0] if len(exact) == 1 else None
-    stem = re.split(r"_plan-\d+(?:-|$)", p.stem, maxsplit=1)[0]
+    stem = re.split(r"_plan-\d+(?:-|$)|_(?:elevation|section)-", p.stem, maxsplit=1)[0]
     matches = [c for c in cands if c.stem == stem]
     return matches[0] if len(matches) == 1 else None
 
@@ -189,6 +189,12 @@ def _result(value, unit, path, scope, method, elements=(), note="") -> Answer:
 
 
 def answer(q: Question, path: Path) -> Answer:
+    from .ifc_overlay import attach
+
+    return attach(_answer(q, path), path)
+
+
+def _answer(q: Question, path: Path) -> Answer:
     if q.type == "text" or "ifc_bench" in q.path:
         return Answer(None, lane="ifc", note="free-form text handled by llm lane")
     qty = _qty(q.question)
