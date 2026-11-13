@@ -29,6 +29,7 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--dump", help="write per-question jsonl here")
     ap.add_argument("--show-wrong", type=int, default=0)
+    ap.add_argument("--min-acc", type=float, help="exit 1 if overall accuracy is below this (regression gate)")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--english", action="store_true", help="skip questions with non-ASCII-heavy translations (halves LLM cost)")
     a = ap.parse_args(argv)
@@ -63,6 +64,10 @@ def main(argv=None) -> int:
     if a.dump:
         with open(a.dump, "w") as fh:
             fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in out)
+    overall = stats[("all", "all")]
+    if a.min_acc is not None and overall[0] and overall[1] / overall[0] < a.min_acc:
+        print(f"FAIL: accuracy {overall[1]/overall[0]:.1%} < {a.min_acc:.1%}")
+        return 1
     return 0
 
 

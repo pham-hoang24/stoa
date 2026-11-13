@@ -23,7 +23,7 @@ def answer(q: Question) -> Answer:
         if lane == "ifc":
             from .lanes import ifc
             a = ifc.answer(q, path)
-            if a.value is None and (q.type == "text" or "ifc_bench" in q.path or "not found" in a.note or "not recognised" in a.note):
+            if a.value is None and (q.type == "text" or "ifc_bench" in q.path or "not recognised" in a.note):
                 from .lanes import llm
                 return llm.answer(q, path)
             return a

@@ -171,7 +171,7 @@ def answer(q: Question, path: Path) -> Answer:
     st = _storey(f, quotes[0])
     qty, cls = _qty(q.question), _entity(q.question)
     if st is None:
-        if cls and qty == "count":  # quote is the model/building name: whole-model count
+        if cls and qty == "count" and has(q.question, "model", "mudel", "modell", "modèle", "modello", "malli", "modellen"):  # quote is the model name
             els = _top(f.by_type(cls), cls)
             return Answer(len(els), "count", [Evidence(str(ifc), e.Name or "", global_id=e.GlobalId) for e in els[:200]], "ifc")
         return Answer(None, lane="ifc", note=f"storey {quotes[0]!r} not found")

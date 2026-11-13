@@ -1,0 +1,51 @@
+"""Seam: the Swiss lane through router.answer. Expected values are dataset ground truth (questions.jsonl), not recomputed."""
+import pytest
+
+from stoa.data import Question
+from stoa.router import answer
+from conftest import needs_data
+
+F = "data/swiss_dwellings/site1000_bldg2082_floor9385.pdf"
+pytestmark = needs_data
+
+
+def ask(text):
+    return answer(Question(path=F, question=text))
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("How many apartments (residential units) are shown on this floor plan?", 4),
+    ("How many doors (interior doors and entrance doors together) are drawn on this floor plan?", 36),
+    ("How many windows are drawn on this floor plan?", 28),
+    ("How many toilets (WC) are drawn on this floor plan?", 4),
+    ("How many washbasins are drawn on this floor plan?", 4),
+    ("How many bathtubs are drawn on this floor plan?", 4),
+    ("Wie viele Räume mit der Bezeichnung «Zimmer» gibt es in diesem Geschoss?", 12),
+])
+def test_counts_are_exact(text, expected):
+    assert ask(text).value == expected
+
+
+def test_room_area_from_polygon():
+    assert ask("What is the net floor area of room 2.10 ('Zimmer') in m²?").value == pytest.approx(16.78, rel=0.02)
+
+
+def test_total_area_of_rooms_with_label():
+    assert ask("What is the total net area in m² of all rooms labelled 'Zimmer' on this floor?").value == pytest.approx(184.93, rel=0.02)
+
+
+def test_apartment_area_excludes_outdoor_spaces():
+    q = "What is the net floor area of apartment A in m², summing all its rooms except balconies, loggias, terraces and other outdoor spaces?"
+    assert ask(q).value == pytest.approx(80.34, rel=0.02)
+
+
+def test_translation_gives_same_answer():
+    assert ask("Wie viele Fenster sind auf diesem Grundriss eingezeichnet?").value == 28
+
+
+def test_evidence_box_lands_on_the_pdf_page():
+    ev = ask("What is the net floor area of room 2.01 ('Zimmer') in m²?").evidence[0]
+    assert ev.file.endswith(".pdf") and ev.page == 0
+    x0, y0, x1, y1 = ev.bbox
+    assert 0 <= x0 < x1 <= 1191 and 0 <= y0 < y1 <= 842  # A3 landscape in points
+    assert x0 < 535 < x1 and y0 < 100 < y1  # contains the printed 'Zimmer 2.01' label near (524..546, 90..104)
