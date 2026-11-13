@@ -192,12 +192,28 @@ def _result(value, unit, path, scope, method, elements=(), note="") -> Answer:
 def answer(q: Question, path: Path) -> Answer:
     from .ifc_overlay import attach
 
-    return attach(_answer(q, path), path)
+    result = _answer(q, path)
+    if q.type == "text" or "ifc_bench" in q.path:
+        return result  # metadata cites attributes/STEP IDs, not a floor projection
+    return attach(result, path)
 
 
 def _answer(q: Question, path: Path) -> Answer:
     if q.type == "text" or "ifc_bench" in q.path:
-        return Answer(None, lane="ifc", note="free-form text handled by llm lane", abstain=ABSTAIN_DEFER)
+        # Missing data stays declined even when the benchmark type is text.
+        from .ifc_text import answer as text_answer
+
+        ifc = resolve_ifc(path)
+        if ifc is None:
+            return Answer(None, lane="ifc", note="no unique companion IFC for text query",
+                          abstain=ABSTAIN_DECLINED)
+        result = text_answer(q.question, ifc)
+        if result is None:
+            return Answer(None, lane="ifc", note="unsupported IFC text template",
+                          abstain=ABSTAIN_DEFER)
+        if result.value is None:
+            result.abstain = ABSTAIN_DECLINED
+        return result
     qty = _qty(q.question)
     kind, name, room, error = _scope(q.question, qty)
     scope = f"{kind}: {name}" if kind else "unresolved"
