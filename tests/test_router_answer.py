@@ -4,18 +4,18 @@ import types
 import pytest
 
 from stoa import router
-from stoa.answer import Answer
+from stoa.answer import ABSTAIN_DECLINED, ABSTAIN_DEFER, Answer
 from stoa.data import Question
 
 
-def fake_lane(name, value=None, note="", boom=False):
+def fake_lane(name, value=None, note="", boom=False, abstain=None):
     calls = []
 
     def answer(q, path):
         calls.append(q)
         if boom:
             raise ValueError("kaput")
-        return Answer(value, lane=name, note=note)
+        return Answer(value, lane=name, note=note, abstain=abstain)
 
     return types.SimpleNamespace(answer=answer, calls=calls)
 
@@ -41,19 +41,20 @@ def test_ifc_answer_is_kept_when_it_has_a_value(lanes):
     assert lanes["doc"].calls == []
 
 
+def test_deferred_abstain_falls_back_to_llm(lanes):
+    lanes["ifc"] = fake_lane("ifc", abstain=ABSTAIN_DEFER)
+    assert router.answer(q("data/ifc_models/a.ifc")).lane == "doc"
+
+
 @pytest.mark.parametrize("path,qtype,note", [
-    ("data/ifc_models/a.ifc", "text", ""),
-    ("data/ifc_bench/a.ifc", "count", ""),
+    ("data/ifc_models/a.ifc", "text", "unsupported entity"),
+    ("data/ifc_bench/a.ifc", "count", "ambiguous scope"),
     ("data/ifc_models/a.ifc", "count", "entity not recognised"),
 ])
-def test_ifc_abstain_falls_back_to_llm(lanes, path, qtype, note):
-    lanes["ifc"] = fake_lane("ifc", value=None, note=note)
-    assert router.answer(q(path, qtype)).lane == "doc"
-
-
-def test_ifc_abstain_without_fallback_reason_stays_abstained(lanes):
-    lanes["ifc"] = fake_lane("ifc", value=None, note="unknown storey")
-    a = router.answer(q("data/ifc_models/a.ifc"))
+def test_declined_abstain_never_reaches_llm(lanes, path, qtype, note):
+    """Unresolved scope must stay abstained, whatever the question type, path or note text."""
+    lanes["ifc"] = fake_lane("ifc", note=note, abstain=ABSTAIN_DECLINED)
+    a = router.answer(q(path, qtype))
     assert a.value is None and a.lane == "ifc" and lanes["doc"].calls == []
 
 

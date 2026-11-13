@@ -18,7 +18,7 @@ import ifcopenshell.util.element as ue
 import ifcopenshell.util.shape as ushape
 import ifcopenshell.util.unit as uunit
 
-from ..answer import Answer, Evidence
+from ..answer import ABSTAIN_DECLINED, ABSTAIN_DEFER, Answer, Evidence
 from ..data import Question
 from ..qparse import norm, quoted
 
@@ -185,12 +185,13 @@ def _result(value, unit, path, scope, method, elements=(), note="") -> Answer:
     # Zero counts and abstentions still cite their source and interpreted scope.
     if not ev:
         ev = [Evidence(str(path), f"scope={scope}; method={method}")]
-    return Answer(value, unit, ev, "ifc", f"scope={scope}; method={method}" + (f"; {note}" if note else ""))
+    return Answer(value, unit, ev, "ifc", f"scope={scope}; method={method}" + (f"; {note}" if note else ""),
+                  abstain=None if value is not None else ABSTAIN_DECLINED)
 
 
 def answer(q: Question, path: Path) -> Answer:
     if q.type == "text" or "ifc_bench" in q.path:
-        return Answer(None, lane="ifc", note="free-form text handled by llm lane")
+        return Answer(None, lane="ifc", note="free-form text handled by llm lane", abstain=ABSTAIN_DEFER)
     qty = _qty(q.question)
     kind, name, room, error = _scope(q.question, qty)
     scope = f"{kind}: {name}" if kind else "unresolved"
