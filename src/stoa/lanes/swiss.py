@@ -18,7 +18,7 @@ from pathlib import Path
 import ezdxf
 from ezdxf.math import Vec2, is_point_in_polygon_2d
 
-from ..answer import Answer, Evidence
+from ..answer import ABSTAIN_DECLINED, ABSTAIN_DEFER, Answer, Evidence
 from ..data import Question, sibling
 from ..qparse import norm, quoted
 
@@ -182,11 +182,13 @@ def _ev(path: Path, rooms: list[Room], plan: Plan | None = None) -> list[Evidenc
     out = []
     for r in rooms:
         x0, y0, x1, y1 = _bbox(r.poly)
+        label = f"{r.number} {r.name}"
         if tf:
             (a, b), (c, d) = tf(x0, y0), tf(x1, y1)
-            out.append(Evidence(str(pdf), f"{r.number} {r.name}", page=0, bbox=(float(min(a, c)), float(min(b, d)), float(max(a, c)), float(max(b, d)))))
+            poly = [(float(x), float(y)) for x, y in (tf(px, py) for px, py in r.poly)]
+            out.append(Evidence(str(pdf), label, page=0, bbox=(float(min(a, c)), float(min(b, d)), float(max(a, c)), float(max(b, d))), polygon=poly))
         else:
-            out.append(Evidence(str(path), f"{r.number} {r.name}", bbox=(x0, y0, x1, y1)))
+            out.append(Evidence(str(path), label, bbox=(x0, y0, x1, y1), polygon=list(r.poly)))
     return out
 
 
@@ -217,7 +219,7 @@ def _intent(q: str) -> str:
 def answer(q: Question, path: Path) -> Answer:
     dxf = path if path.suffix == ".dxf" else sibling(path, ".dxf")
     if dxf is None:
-        return Answer(None, lane="swiss", note="no DXF twin")
+        return Answer(None, lane="swiss", note=f"declined: no DXF twin for {path.name}", abstain=ABSTAIN_DECLINED)
     plan = load(str(dxf))
     intent = _intent(q.question)
     quotes = quoted(q.question)
@@ -232,7 +234,9 @@ def answer(q: Question, path: Path) -> Answer:
     if intent == "room_area":
         m = re.search(r"(?:room|raum|pièce|locale) ([\w.]+) ?[\(«]", q.question, re.I)
         rs = [r for r in plan.rooms if r.number == m.group(1)]
-        return Answer(round(rs[0].area, 2) if rs else None, "m2", _ev(path, rs, plan), "swiss", "" if rs else "room not found")
+        if not rs:
+            return Answer(None, "m2", lane="swiss", note=f"declined: room {m.group(1)} not found on this floor", abstain=ABSTAIN_DECLINED)
+        return Answer(round(rs[0].area, 2), "m2", _ev(path, rs, plan), "swiss")
     if intent == "label_area":
         rs = [r for r in plan.rooms if norm(r.name) == norm(quotes[0])]
         return Answer(round(sum(r.area for r in rs), 2), "m2", _ev(path, rs, plan), "swiss")
@@ -243,7 +247,9 @@ def answer(q: Question, path: Path) -> Answer:
         letter = re.search(r"(?:apartment|wohnung|appartement|appartamento|logement) ([A-Za-z]{1,2})\b", q.question, re.I).group(1).upper()
         tagged = next((r for r in plan.rooms if r.apt_tag == letter), None)
         if tagged is None:
-            return Answer(None, lane="swiss", note=f"apartment {letter} not found")
-        rs = [r for r in plan.rooms if r.unit == tagged.unit and tagged.unit is not None and not excluded(r.name)]
+            return Answer(None, "m2", lane="swiss", note=f"declined: apartment {letter} not found on this floor", abstain=ABSTAIN_DECLINED)
+        if tagged.unit is None:
+            return Answer(None, "m2", lane="swiss", note=f"declined: apartment {letter} has no unit outline", abstain=ABSTAIN_DECLINED)
+        rs = [r for r in plan.rooms if r.unit == tagged.unit and not excluded(r.name)]
         return Answer(round(sum(r.area for r in rs), 2), "m2", _ev(path, rs, plan), "swiss")
-    return Answer(None, lane="swiss", note="intent not recognised")
+    return Answer(None, lane="swiss", note="intent not recognised", abstain=ABSTAIN_DEFER)
