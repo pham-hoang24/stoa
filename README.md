@@ -36,6 +36,21 @@ interpretation use the server's configured OpenAI-compatible transport: set
 bounds live calls; responses cache in `.cache/llm/`. Keys never reach the browser.
 Missing keys, caps and outages produce explicit abstentions.
 
+To use Modal, keep `MODAL_API_KEY` in the server environment or local `.env` and run:
+
+```sh
+uv run stoa-chat --llm-provider modal
+```
+
+Alternatively set `STOA_LLM_PROVIDER=modal` in `.env`. The Modal preset uses
+`https://uknowme1928--ep-stoa-server.us-west.modal.direct/v1` and
+`Qwen/Qwen3.8-Max-VL-Thinking`. Optional `STOA_MODAL_BASE_URL` and `STOA_MODAL_MODEL`
+override that preset; a root endpoint URL is normalized to `/v1`. Modal uses
+`MODAL_API_KEY` exclusively, so existing Featherless credentials and generic
+`STOA_LLM_MODEL`/`STOA_LLM_BASE_URL` settings do not leak into this selection.
+Featherless remains the default (`--llm-provider featherless`) with the existing
+`STOA_LLM_*` overrides. Restart the server when changing CLI or `.env` settings.
+
 Answers distinguish **native source support**, **unreviewed model proposals**,
 **estimates**, **clarification**, **abstention** and **analysis errors**. Model
 extraction supplies facts and regions; Python computes quantities. A quantity

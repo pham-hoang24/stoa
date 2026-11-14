@@ -1,9 +1,11 @@
-"""LLM lane (Featherless, OpenAI-compatible): vision for raster plans, text/PDF/IFC-summary QA.
+"""OpenAI-compatible LLM transport: Featherless and Modal provider presets.
 
 Config is read at call time from env (.env, never committed):
   STOA_LLM_API_KEY (or FEATHERLESS_API_KEY), STOA_LLM_BASE_URL (any OpenAI-compatible endpoint, default Featherless),
   STOA_LLM_MODEL, STOA_LLM_MAX_REQUESTS (live-request cap per process, default 200; 0 = no live calls).
-Every call is cached on disk under .cache/llm by hash of (model, messages). Cached replies are free and uncapped.
+  STOA_LLM_PROVIDER=modal selects MODAL_API_KEY plus STOA_MODAL_BASE_URL/STOA_MODAL_MODEL overrides.
+Every call is cached under .cache/llm by provider, endpoint, model, messages and generation parameters.
+Cached replies are free and uncapped.
 There are no automatic retries: one live call is one billed request. Failures raise LLMError with a readable reason.
 """
 from __future__ import annotations
@@ -36,9 +38,11 @@ class LLMError(RuntimeError):
 def settings() -> dict:
     """Provider settings from the environment right now (not frozen at import)."""
     _env()
-    key = os.environ.get("STOA_LLM_API_KEY") or os.environ.get("FEATHERLESS_API_KEY")
-    return {"model": os.environ.get("STOA_LLM_MODEL", DEFAULT_MODEL), "base_url": os.environ.get("STOA_LLM_BASE_URL", DEFAULT_BASE),
-            "api_key": key, "max_requests": int(os.environ.get("STOA_LLM_MAX_REQUESTS", DEFAULT_MAX_REQUESTS))}
+    from ..providers import configuration
+    try:
+        return configuration(DEFAULT_MODEL, DEFAULT_BASE, DEFAULT_MAX_REQUESTS)
+    except ValueError as exc:
+        raise LLMError(str(exc)) from exc
 
 
 def reset_usage() -> None:
@@ -63,24 +67,20 @@ SYSTEM_DRAWING = "You are a careful construction drawing reader."
 
 
 def _env() -> None:
-    f = REPO / ".env"
-    if f.exists():
-        for line in f.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+    from dotenv import load_dotenv
+    load_dotenv(REPO / ".env", override=False)
 
 
 def chat(messages: list[dict], model: str | None = None, max_tokens: int = 600, temperature: float = 0.0) -> str:
     cfg = settings()
     model = model or cfg["model"]
-    key = hashlib.sha256(json.dumps([model, messages, max_tokens, temperature], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([cfg["provider"], cfg["base_url"], model, messages, max_tokens, temperature], sort_keys=True).encode()).hexdigest()
     cf = CACHE / f"{key}.txt"
     if cf.exists():
         _count(cached=1)
         return cf.read_text()
     if not cfg["api_key"]:
-        raise LLMError("no API key: set STOA_LLM_API_KEY or FEATHERLESS_API_KEY")
+        raise LLMError(f"no API key: set {cfg['api_key_env']}")
     with _LOCK:  # reserve the request before sending so parallel workers cannot overshoot the cap
         if _USAGE["calls"] >= cfg["max_requests"]:
             raise LLMError(f"request cap reached ({cfg['max_requests']} live requests; raise STOA_LLM_MAX_REQUESTS)")

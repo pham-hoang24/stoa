@@ -120,7 +120,9 @@ def extract(context, catalogs, kind):
         answer=calculate(plan, pages, native, kind, context['drawings'], required_coverage)
         if answer['status'] not in {'abstain','clarification'} and not answer.get('target'):
             answer['target']=context['question']
-        answer['model_provenance']={'transport':'stoa.lanes.llm.chat','model':llm.settings()['model'],'review_status':'unreviewed'}
+        config=llm.settings()
+        answer['model_provenance']={'transport':'stoa.lanes.llm.chat','provider':config.get('provider','featherless'),
+                                    'model':config['model'],'review_status':'unreviewed'}
         return answer
     except llm.LLMError as exc:
         # Keep configuration/cap details readable, without exposing provider exception bodies.
