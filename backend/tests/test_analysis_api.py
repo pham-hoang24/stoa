@@ -46,3 +46,28 @@ def test_default_native_ifc_count_then_area_followup_without_provider(tmp_path, 
         assert area['unit'] == 'm²'
         assert area['calculation']['operation'] == 'sum'
         assert all(e['property'] == 'Qto_WallBaseQuantities.NetSideArea' for e in area['evidence'])
+
+
+def test_visual_count_maps_preview_regions_and_keeps_unreviewed_state(tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+    from stoa.lanes import llm
+    def extract(messages, **kwargs):
+        payload = json.loads(messages[-1]['content'][0]['text'])
+        page = payload['pages'][0]
+        assert page['width'] == 1600 and page['source_width'] == 3200
+        return json.dumps({'operation': 'count', 'complete': True, 'coverage': [page['id']],
+                           'facts': [{'page_ref': page['id'], 'bbox': [100, 50, 200, 150], 'kind': 'object', 'label': 'sauna'}]})
+    monkeypatch.setattr(llm, 'chat', extract)
+    image = cv2.imencode('.png', np.zeros((800,3200,3), dtype=np.uint8))[1].tobytes()
+    with running(tmp_path) as base:
+        path, drawing = upload(base, 'random.png', image)
+        answer = ask(base, path, drawing, 'Kuinka monta saunaa?')
+        assert answer['value'] == 1
+        assert answer['status'] == 'proposal'
+        assert answer['review_status'] == 'unreviewed'
+        evidence = answer['evidence'][0]
+        assert evidence['bbox'] == [200,100,400,300]
+        assert evidence['source_width'] == 3200
+        preview = request(base, evidence['preview_url'].removeprefix('/api'))
+        assert preview[0] == 200 and preview[1].startswith(b'\x89PNG')

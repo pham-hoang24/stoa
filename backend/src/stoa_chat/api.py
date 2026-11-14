@@ -180,6 +180,22 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                     self.end_headers()
                     self.wfile.write(body)
                     return
+                if parts[3] == 'previews' and len(parts) == 6 and self.command == 'GET':
+                    drawing = next((d for d in chat['drawings'] if d['id'] == parts[4]), None)
+                    if drawing is None:
+                        raise ApiError(404, 'Drawing not in this chat')
+                    from .render import preview
+                    try:
+                        body, _ = preview({**drawing, 'path': store.assets / drawing['sha256']}, int(parts[5]))
+                    except (ValueError, RuntimeError):
+                        raise ApiError(404, 'Preview unavailable')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'image/png')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if parts[3] == 'questions' and len(parts) == 4 and self.command == 'POST':
                     data = self.read_json()
                     question = data.get('question')

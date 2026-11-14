@@ -64,5 +64,9 @@ class HybridAnswerer:
         prior = next((m['answer'].get('target') for m in reversed(context['messages'])
                       if m['role'] == 'assistant' and m.get('drawing_ids') == context['drawing_ids']), None)
         drawing = context['drawings'][0]
-        answer = native_answer(context['question'], drawing, inventory(drawing), prior)
-        return answer or abstain('This question requires evidence extraction; no suitable native answer is available.')
+        data = inventory(drawing)
+        answer = native_answer(context['question'], drawing, data, prior)
+        if answer is not None:
+            return answer
+        from .extraction import extract
+        return extract(context, [data], question_kind(context['question']))
