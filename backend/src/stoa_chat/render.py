@@ -6,6 +6,9 @@ import pymupdf
 
 MAX_SIDE = 1600
 MAX_PAGES = 12
+# One full view for raster questions. The model downsamples internally (about 3.4k prompt
+# tokens for both 2480- and 3000-pixel sheets), so sending more pixels buys nothing.
+SINGLE_VIEW_MAX_SIDE = 3000
 
 
 def raster_image(drawing):
@@ -25,7 +28,7 @@ def raster_image(drawing):
     return image
 
 
-def preview(drawing, page=1):
+def preview(drawing, page=1, max_side=MAX_SIDE):
     metadata = next((p for p in drawing['pages'] if p['page'] == page), None)
     if metadata is None:
         raise ValueError('Source page does not exist')
@@ -59,7 +62,7 @@ def preview(drawing, page=1):
     if image is None:
         raise ValueError('Cannot decode preview')
     height, width = image.shape[:2]
-    factor = min(1, MAX_SIDE / max(width, height))
+    factor = min(1, max_side / max(width, height))
     if factor < 1:
         image = cv2.resize(image, (max(1, round(width * factor)), max(1, round(height * factor))))
     height, width = image.shape[:2]
@@ -69,6 +72,9 @@ def preview(drawing, page=1):
                   'source_origin': origin, 'source_units': metadata['units'],
                   'transform': [metadata['width'] / width, 0, 0, metadata['height'] / height, *origin],
                   'original_url': drawing['asset_url'], 'preview_url': drawing['asset_url'].replace('/assets/', '/previews/') + '/' + str(page)}
+    if format == 'jpeg' and max_side > MAX_SIDE:
+        # A large photographic scan re-encoded as PNG can exceed provider request limits.
+        return cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes(), descriptor
     return cv2.imencode('.png', image)[1].tobytes(), descriptor
 
 

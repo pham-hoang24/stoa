@@ -4,7 +4,6 @@ from .render import raster_views, TILE_SIDE, TILE_OVERLAP
 
 
 DETAILS_PER_BATCH = 3
-MAX_JOINT_DETAILS = 12
 MAX_COUNT_FACTS = 3000
 
 
@@ -70,10 +69,8 @@ def extract_details(context,catalogs,kind,extractor):
                 'required_views':required,'completed_views':[],
                 'regions':[{'id':v['id'],'source_bbox':v['source_bbox']} for _,v in details]}
     if kind!='count':
-        if len(details)>MAX_JOINT_DETAILS:
-            return {**abstain(f'This question requires {len(details)} detail regions together; the current measurement/text limit is {MAX_JOINT_DETAILS}. Select a smaller image scope. No detail regions were silently omitted.','image_detail_scope'),
-                    'image_processing':processing}
-        answer=extractor(context,catalogs,kind,_views=views)
+        # Normally unreachable: extract() answers non-count raster questions from one full view.
+        answer=extractor(context,catalogs,kind)
         if answer['status'] not in {'abstain','clarification'}:processing['completed_views']=required[:]
         answer['image_processing']=processing
         return answer
@@ -81,6 +78,10 @@ def extract_details(context,catalogs,kind,extractor):
     for start in range(0,len(details),DETAILS_PER_BATCH):
         batch=details[start:start+DETAILS_PER_BATCH]
         answer=extractor(context,catalogs,kind,_views=[overview]+batch)
+        if answer.get('error')=='invalid_extraction':
+            # One fresh retry of only this batch; completed batches are kept, never re-asked.
+            processing.setdefault('retried_batches',[]).append(start//DETAILS_PER_BATCH+1)
+            answer=extractor(context,catalogs,kind,_views=[overview]+batch)
         answers.append(answer)
         if answer['status'] in {'abstain','clarification'}:
             answer={**answer,'explanation':'Could not complete all required image regions. '+answer['explanation'],

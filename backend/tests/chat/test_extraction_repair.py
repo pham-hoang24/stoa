@@ -64,7 +64,8 @@ def test_unmarked_out_of_bounds_is_not_guessed_or_clamped(source):
 
 def test_normalized_coordinates_require_known_units_and_bounds(source):
     page,drawing,_=source
-    for space,box in [('unknown',[1,1,2,2]),('normalized_1000',[0,0,1001,500])]:
+    # Overshoot within 2% is clamped (see test_answer_pipeline); beyond it is rejected.
+    for space,box in [('unknown',[1,1,2,2]),('normalized_1000',[0,0,1100,500])]:
         p=kitchen(page,True);p['facts'][0].update(coordinate_space=space,bbox=box)
         with pytest.raises(ValueError):
             calculate(p,{page['id']:page},{},'count',[drawing],[page['id']])
