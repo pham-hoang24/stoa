@@ -154,6 +154,7 @@ def live(monkeypatch, tmp_path):
     monkeypatch.setattr(llm, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(llm, "_env", lambda: None)
     monkeypatch.setenv("STOA_LLM_API_KEY", "k")
+    monkeypatch.setenv("STOA_LLM_PROVIDER", "featherless")
     llm.reset_usage()
     return monkeypatch
 

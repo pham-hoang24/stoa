@@ -121,8 +121,8 @@ def extract(context, catalogs, kind):
         if answer['status'] not in {'abstain','clarification'} and not answer.get('target'):
             answer['target']=context['question']
         config=llm.settings()
-        answer['model_provenance']={'transport':'stoa.lanes.llm.chat','provider':config.get('provider','featherless'),
-                                    'model':config['model'],'review_status':'unreviewed'}
+        provenance=getattr(raw,'provenance',{'provider':config['provider'],'model':config['model']})
+        answer['model_provenance']={'transport':'stoa.lanes.llm.chat',**provenance,'review_status':'unreviewed'}
         return answer
     except llm.LLMError as exc:
         # Keep configuration/cap details readable, without exposing provider exception bodies.

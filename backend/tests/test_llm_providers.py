@@ -14,7 +14,8 @@ def transport(monkeypatch, tmp_path):
     # dotenv adds variables directly; keep those additions local to this test.
     monkeypatch.setattr(os, 'environ', os.environ.copy())
     for name in ('STOA_LLM_PROVIDER', 'MODAL_API_KEY', 'STOA_MODAL_BASE_URL', 'STOA_MODAL_MODEL',
-                 'STOA_LLM_MODEL', 'STOA_LLM_BASE_URL', 'FEATHERLESS_API_KEY', 'STOA_LLM_MAX_REQUESTS'):
+                 'STOA_LLM_MODEL', 'STOA_LLM_BASE_URL', 'FEATHERLESS_API_KEY', 'STOA_LLM_MAX_REQUESTS',
+                 'NVIDIA_API_KEY', 'STOA_NVIDIA_MODEL', 'STOA_NVIDIA_BASE_URL', 'STOA_LLM_FALLBACK', 'STOA_LLM_TIMEOUT_SECONDS'):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv('STOA_LLM_API_KEY', 'controlled-featherless-key')
     monkeypatch.setattr(llm, '_env', lambda: None)

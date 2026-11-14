@@ -85,6 +85,7 @@ def test_default_upload_adapter_reaches_bounded_transport(tmp_path, monkeypatch)
     from stoa.lanes import llm
 
     monkeypatch.setenv("STOA_LLM_API_KEY", "controlled-test-key")
+    monkeypatch.setenv("STOA_LLM_PROVIDER", "featherless")
     monkeypatch.setenv("STOA_LLM_MAX_REQUESTS", "1")
     monkeypatch.setattr(llm, "CACHE", tmp_path / "provider-cache")
     monkeypatch.setattr(llm, "_USAGE", {"calls": 0, "cached": 0, "prompt_tokens": 0, "completion_tokens": 0})
