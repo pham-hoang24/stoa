@@ -30,6 +30,14 @@ PYTHONPATH=backend/src .venv/bin/python -m pytest backend/tests -q
 
 The CLI serves repository `frontend/` at `/` by default; `--frontend` overrides that directory; it does not modify the pitch site. Scripts must be external files because the frontend content policy does not permit inline JavaScript. Original SVG is served with a restrictive sandbox policy; callers should render evidence safely rather than inserting SVG source into HTML.
 
+Provider selection is server-side: `--llm-provider modal` overrides `STOA_LLM_PROVIDER`
+for this process. Modal uses the configured endpoint preset and
+`Qwen/Qwen3.8-Max-VL-Thinking`, authenticated only with `MODAL_API_KEY`. Override its
+endpoint/model using `STOA_MODAL_BASE_URL` and `STOA_MODAL_MODEL`. Featherless remains
+the default and retains the existing `STOA_LLM_*` configuration. Provider and
+endpoint identities separate cached responses; live request caps and no-retry
+transport behavior remain shared. See the root README for runnable configuration.
+
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
 
 Default upload limits are 512 MiB for IFC (`max_ifc_upload_bytes`) and 50 MiB for other formats (`max_upload_bytes`). Set `stoa-chat --max-ifc-upload-mib 1024` to accept IFC models up to 1 GiB. Both limits must be positive byte counts; the CLI accepts a positive whole number of MiB. A larger filename-based size allowance does not bypass content validation. JSON requests are bounded to 1 MiB, questions to 10,000 characters, titles to 200 characters. PDF accepts 1–1000 accessible, unencrypted pages; image pixel limit is 80 million. SVG uses static element and inline presentation-style allowlists and disallows script, events, document declarations, active CSS and external resources. DXF accepts complete ASCII and binary drawings. Original coordinates are retained: raster pixels, PDF points, SVG viewBox including origin, or explicit width/height in user coordinates when no viewBox exists. Absolute SVG length units are converted to CSS pixels at 96 dpi; relative or omitted dimensions remain unresolved rather than inventing a viewport. PNG/JPEG header dimensions are bounded before allocating decoded pixels. IFC GlobalIds and DXF handles are included as `entity_ids`.
