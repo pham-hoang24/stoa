@@ -66,7 +66,7 @@ def test_missing_apartment_abstains_with_reason():
     assert a.value is None and a.abstain == "declined" and "Z" in a.note
 
 
-def test_pdf_without_dxf_twin_abstains(tmp_path, monkeypatch):
+def test_pdf_without_dxf_sibling_abstains(tmp_path, monkeypatch):
     from stoa import data
     from stoa.data import Question
     from stoa.router import answer
@@ -74,7 +74,7 @@ def test_pdf_without_dxf_twin_abstains(tmp_path, monkeypatch):
     (tmp_path / "data" / "swiss_dwellings" / "lonely.pdf").write_bytes(b"%PDF")
     monkeypatch.setattr(data, "ROOT", tmp_path)
     a = answer(Question(path="data/swiss_dwellings/lonely.pdf", question="How many doors are drawn on this floor plan?"))
-    assert a.value is None and a.abstain == "declined" and "DXF twin" in a.note
+    assert a.value is None and a.abstain == "declined" and "DXF sibling" in a.note
 
 
 def test_unrecognised_question_defers_instead_of_guessing():

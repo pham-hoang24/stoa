@@ -10,7 +10,7 @@ The router picks a lane from the drawing's source and format. Each lane returns 
 |---|---|---|
 | `ifc` | `ifc_models`, `ifc_bench` | IfcOpenShell: quantities and spatial structure |
 | `swiss` | `swiss_dwellings` | Rules on the DXF sibling of each PDF, no LLM |
-| `vision` | `cubicasa5k` PNGs | Vision model; still uses dataset priors for some templates, to be removed as answer leakage (#7) |
+| `vision` | `cubicasa5k` PNGs | Vision model detects doors/windows; counting, dedup and numbering are done in code, no dataset priors |
 | `doc` | everything else | LLM over page text and renders (`lanes/llm.py`) |
 
 ## Setup
@@ -29,7 +29,7 @@ echo "FEATHERLESS_API_KEY=..." > .env           # only the llm and vision lanes 
 stoa ask data/swiss_dwellings/<file>.pdf "How many doors are drawn on this floor plan?"
 stoa serve                                       # click-to-verify viewer on :8765
 python -m stoa.eval.run --lane swiss --show-wrong 20
-make check                                       # tests + no-LLM accuracy gate (needs the dataset)
+make check                                       # tests + no-LLM accuracy gate (needs the dataset, no API key)
 ```
 
 ## Team

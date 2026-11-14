@@ -1,4 +1,4 @@
-"""Swiss Dwellings lane: rule-based geometry on the DXF twin of each PDF (no LLM).
+"""Swiss Dwellings lane: rule-based geometry on the DXF sibling of each PDF (no LLM).
 
 Rules were fitted on the 65 preview floors against ground truth (see docs/research):
   doors      = 5-vertex DOOR polylines          windows = 4-vertex WINDOW polylines
@@ -171,7 +171,7 @@ def _pdf_transform(plan: Plan, pdf: Path):
 
 
 def _ev(path: Path, rooms: list[Room], plan: Plan | None = None) -> list[Evidence]:
-    """Evidence boxes in PDF page points when a PDF twin exists, else DXF units."""
+    """Evidence boxes in PDF page points when a PDF sibling exists, else DXF units."""
     tf = None
     pdf = path if path.suffix == ".pdf" else sibling(path, ".pdf")
     if plan is not None and pdf is not None:
@@ -219,7 +219,7 @@ def _intent(q: str) -> str:
 def answer(q: Question, path: Path) -> Answer:
     dxf = path if path.suffix == ".dxf" else sibling(path, ".dxf")
     if dxf is None:
-        return Answer(None, lane="swiss", note=f"declined: no DXF twin for {path.name}", abstain=ABSTAIN_DECLINED)
+        return Answer(None, lane="swiss", note=f"declined: no DXF sibling for {path.name}", abstain=ABSTAIN_DECLINED)
     plan = load(str(dxf))
     intent = _intent(q.question)
     quotes = quoted(q.question)

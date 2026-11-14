@@ -20,7 +20,7 @@ LICENCES = {
     "ifc_models": "per file, see data/ifc_models/LICENSE.md",
     "ifc_bench": "per file, see data/ifc_bench/LICENSE.md",
 }
-METHODS = {"swiss": "Rules on the DXF twin (no LLM)", "ifc": "IFC model data (no LLM)",
+METHODS = {"swiss": "Rules on the DXF sibling (no LLM)", "ifc": "IFC model data (no LLM)",
            "vision": "VLM box detections, validated and counted in code", "llm": "LLM free-text reading"}
 
 
