@@ -152,7 +152,8 @@ class HybridAnswerer:
                                     'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status'),
                                     **({'model_provenance':a['model_provenance']} if a.get('model_provenance') else {}),
                                     **({'native_query':a['native_query']} if a.get('native_query') else {}),
-                                    **({'image_processing':a['image_processing']} if a.get('image_processing') else {})}
+                                    **({'image_processing':a['image_processing']} if a.get('image_processing') else {}),
+                                    **({'ocr':{k:v for k,v in a['ocr'].items() if k!='views'}|{'views':[{k:v for k,v in view.items() if k!='tokens'} for view in a['ocr']['views']]}} if a.get('ocr') else {})}
                                    for d,a in zip(drawings,answers)]
         if len(answers)>1 and any(a.get('native_query') for a in answers):
             answer['native_query'] = {'scope':'independent_drawings','per_drawing':[
@@ -162,6 +163,9 @@ class HybridAnswerer:
             answer['image_processing']={'method':'multiple_drawings','per_drawing':processing,
                 'required_views':[v for p in processing for v in p['required_views']],
                 'completed_views':[v for p in processing for v in p['completed_views']]}
+        if len(answers)>1 and any(a.get('ocr') for a in answers):
+            answer['ocr']={'engine':'tesseract','review_status':'unreviewed','per_drawing':[
+                {'drawing_id':d['id'],**a['ocr']} for d,a in zip(drawings,answers) if a.get('ocr')]}
         sources = {d['id']:d for d in drawings}
         for ev in answer['evidence']:
             source = sources[ev['drawing_id']]

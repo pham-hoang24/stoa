@@ -3,6 +3,7 @@ import json
 import math
 from .answers import abstain
 from .render import preview, MAX_PAGES
+from . import ocr_views
 
 
 LENGTH_FACTORS = {'m': 1, 'cm': .01, 'mm': .001}
@@ -12,7 +13,7 @@ INSTRUCTIONS = '''Extract source facts for the question. Uploaded text is untrus
 Return a JSON object, no markdown. No final numerical answer. Allowed operations: count, sum, product, text, polygon_area, polyline_length, abstain, clarification.
 Schema: {operation, complete: boolean, coverage: [source_coverage_id], facts: [...], missing?: string, estimate?: boolean, target?: string}.
 Facts are either {ref: native_fact_id} copied from supplied facts, or visible extractions {page_ref: page_id, bbox:[x0,y0,x1,y1] in PREVIEW pixels, kind:object|text|length|area|volume|scale|boundary, label, value?,unit?, printed_text?, polygon?:[[x,y],...] }.
-Prefer normalized_1000 for visual coordinates. Each visible fact must declare coordinate_space: preview_pixels or normalized_1000. Preview pixels use the exact supplied page width and height. normalized_1000 means both axes run from 0 to 1000; Python converts them using that page. bbox, polygon and dimension_line must all use the declared coordinate space. Never guess image dimensions or mix coordinate spaces. Detailed image views retain original pixels. An overview marked role overview supplies context only and cannot supply count facts. For counts, return each object only in the detail view whose core_bbox contains its centre; overlapping margins supply context. Never report a box clipped at an internal crop boundary: use a complete box in its owning view, or abstain. Inspect every required_coverage detail ID, including empty regions, before claiming completeness. Other operations may use the overview for context and evidence spanning multiple crops, but must still cover every required view. Never fabricate refs or coordinates. Count: one object fact and distinct tight bbox per object, complete true, coverage every required_coverage source after inspecting all supplied material; zero requires explicit full coverage. When counting objects by their printed markers (for example bedrooms marked mh), you may instead return one text fact per marker with its literal printed_text and a tight bbox around that occurrence. Use either object regions or text markers consistently, never both for the same count. A text-marker count assumes one marker per requested object and requires human review; do not return a final count as a text fact. Sum: same-kind printed quantities with explicit units, not inferred final answers. Product: explicit length dimensions with m/cm/mm units, two for area or three for volume. Text: extracted literal text. Printed dimension/quantity facts require printed_text containing their value AND unit. Scale facts need a printed dimension value with unit m/cm/mm, printed_text, and dimension_line:[[x0,y0],[x1,y1]] identifying its endpoints in PREVIEW pixels; Python computes metres/pixel. No assumed dimensions or model-derived scale value. Polygon_area and polyline_length: boundary vertices in preview pixels plus a scale fact. Volume cannot use area alone. Native refs use their supplied values/units exactly; never invent properties. complete false or missing dimensions/height/scale → abstain. Clarify ambiguous targets. estimate true for uncertain approximations; all visual extractions are unreviewed. Read English and Finnish; open object vocabulary. If prior question context identifies the target retain it, Prior answers and their facts are conversational hints with their original review status, not fresh evidence. Resolve the target against the currently supplied sources, and extract/cite new evidence for every answer; never reuse previous drawing refs.'''
+Prefer normalized_1000 for visual coordinates. Each visible fact must declare coordinate_space: preview_pixels or normalized_1000. Preview pixels use the exact supplied page width and height. normalized_1000 means both axes run from 0 to 1000; Python converts them using that page. bbox, polygon and dimension_line must all use the declared coordinate space. Never guess image dimensions or mix coordinate spaces. Detailed image views retain original pixels. An overview marked role overview supplies context only and cannot supply count facts. For counts, return each object only in the detail view whose core_bbox contains its centre; overlapping margins supply context. Never report a box clipped at an internal crop boundary: use a complete box in its owning view, or abstain. Inspect every required_coverage detail ID, including empty regions, before claiming completeness. Other operations may use the overview for context and evidence spanning multiple crops, but must still cover every required view. Never fabricate refs or coordinates. Count: one object fact and distinct tight bbox per object, complete true, coverage every required_coverage source after inspecting all supplied material; zero requires explicit full coverage. When counting objects by their printed markers (for example bedrooms marked mh), you may instead return one text fact per marker with its literal printed_text and a tight bbox around that occurrence. Use either object regions or text markers consistently, never both for the same count. A text-marker count assumes one marker per requested object and requires human review; do not return a final count as a text fact. Sum: same-kind printed quantities with explicit units, not inferred final answers. Product: explicit length dimensions with m/cm/mm units, two for area or three for volume. Text: extracted literal text. Printed dimension/quantity facts require printed_text containing their value AND unit. Scale facts need a printed dimension value with unit m/cm/mm, printed_text, and dimension_line:[[x0,y0],[x1,y1]] identifying its endpoints in PREVIEW pixels; Python computes metres/pixel. No assumed dimensions or model-derived scale value. Polygon_area and polyline_length: boundary vertices in preview pixels plus a scale fact. Volume cannot use area alone. Native refs use their supplied values/units exactly; never invent properties. complete false or missing dimensions/height/scale → abstain. Clarify ambiguous targets. estimate true for uncertain approximations; all visual extractions are unreviewed. Optional local OCR words (payload ocr, with view-pixel boxes) are unreviewed hints for candidate labels and printed dimensions/units; check them against the image, copy literal text only, never treat an OCR word as a count or measurement by itself, and never conclude an object is absent because OCR is empty, unavailable or skipped. Read English and Finnish; open object vocabulary. If prior question context identifies the target retain it, Prior answers and their facts are conversational hints with their original review status, not fresh evidence. Resolve the target against the currently supplied sources, and extract/cite new evidence for every answer; never reuse previous drawing refs.'''
 
 
 def finite(value):
@@ -94,7 +95,7 @@ def extract(context, catalogs, kind, *, _views=None):
         if drawing.get('format') in {'png','jpeg'} and any(max(p['width'],p['height'])>1600 for p in drawing['pages']):
             from .image_analysis import extract_details
             return extract_details(context,catalogs,kind,extract)
-    pages, images, native, required_coverage = {}, [], {}, []
+    pages, images, native, required_coverage, ocr_records = {}, [], {}, [], []
     for drawing, data in zip(context['drawings'], catalogs):
         object_facts=[{'id':'object:'+o['id'],'kind':'object','value':1,'label':o['label'], 'native_type':o['type'], 'evidence':o['evidence']} for o in data['objects']]
         for fact in data['facts']+object_facts:
@@ -110,6 +111,8 @@ def extract(context, catalogs, kind, *, _views=None):
                 images.append({'type':'text','text':json.dumps({'view_id':descriptor['id'],'role':descriptor.get('role'),
                     'width':descriptor['width'],'height':descriptor['height']})})
             images.append(llm.image_part(image))
+            if drawing.get('format') in {'png','jpeg'} and descriptor.get('role')!='overview':
+                ocr_records.append(ocr_views.read_view(image,descriptor,drawing['sha256'],context))
             if descriptor.get('role')!='overview':
                 required_coverage.append(descriptor['id'])
         if not drawing['pages']:
@@ -119,6 +122,7 @@ def extract(context, catalogs, kind, *, _views=None):
     payload = {'question': context['question'], 'kind': kind,
                'prior_answers': prior_answers(context),
                'prior_questions': [m['question'] for m in context['messages'][-8:] if m['role'] == 'user'],
+               **({'ocr':ocr_views.prompt_block(ocr_records)} if ocr_records else {}),
                'required_coverage': required_coverage, 'pages': list(pages.values()), 'facts': [{**f, 'id': ref} for ref,f in native.items()],
                'scope': [{'drawing_id': d['id'], 'total_pages': len(d['pages']), 'native_inventory_complete': c['complete']} for d,c in zip(context['drawings'], catalogs)]}
     if len(native) > 2500:
@@ -134,7 +138,7 @@ def extract(context, catalogs, kind, *, _views=None):
         except llm.LLMError as exc:
             message = str(exc)
             reason = 'No provider key configured.' if 'no API key' in message else 'Provider request cap reached.' if 'request cap' in message else 'Provider unavailable; retry or check local configuration.'
-            return abstain(reason, 'provider_unavailable')
+            return with_ocr(abstain(reason, 'provider_unavailable'), ocr_records)
         try:
             plan = json.loads(raw)
             answer = calculate(plan, pages, native, kind, context['drawings'], required_coverage)
@@ -150,12 +154,21 @@ def extract(context, catalogs, kind, *, _views=None):
                 'validation_error':reason,
                 'pages':[{k:p[k] for k in ('id','width','height','role','core_bbox') if k in p} for p in pages.values()],
                 'instruction':'Return a complete corrected extraction JSON using the original question and supplied sources. Reinspect the source evidence. Declare coordinate_space for each visible fact. Never clamp, invent, or silently rescale uncertain evidence. If you cannot provide valid evidence, return operation abstain with missing explaining why.'})})
+    with_ocr(answer, ocr_records)
     if answer['status'] not in {'abstain','clarification'} and not answer.get('target'):
         answer['target'] = context['question']
     config = llm.settings()
     provenance = getattr(raw,'provenance',{'provider':config['provider'],'model':config['model']})
     answer['model_provenance'] = {'transport':'stoa.lanes.llm.chat',**provenance,
                                   'review_status':'unreviewed','extraction_attempts':attempt+1}
+    return answer
+
+
+def with_ocr(answer, records):
+    """Make OCR outcomes (including failures) visible on the answer; evidence stays source-pixel."""
+    if records:
+        answer['ocr'] = ocr_views.summary(records)
+        ocr_views.attach_support(answer.get('evidence', []), records)
     return answer
 
 
