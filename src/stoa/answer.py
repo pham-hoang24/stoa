@@ -14,6 +14,7 @@ class Evidence:
     page: int | None = None
     bbox: tuple[float, float, float, float] | None = None  # x0,y0,x1,y1; PDF/SVG: top-left origin, 72-point render coordinates, page=0
     global_id: str | None = None  # IFC GlobalId
+    polygon: list[tuple[float, float]] | None = None  # closed outline, same coordinate space as bbox (Swiss room boundary)
 
 
 @dataclass
