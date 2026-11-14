@@ -115,3 +115,14 @@ def test_missing_global_id_cannot_silently_reduce_count(tmp_path,monkeypatch):
     answer=ask(d,'How many doors?')
     assert answer['value'] is None and answer['error']=='ifc_missing_identifiers'
     assert answer['native_query']['matched_entities']==3
+
+
+def test_building_title_in_multi_project_upload_cannot_select_whole_file(tmp_path,monkeypatch):
+    import ifcopenshell
+    d=source(tmp_path)
+    m=ifcopenshell.open(str(d['path']))
+    m.create_entity('IfcProject',GlobalId=ifcopenshell.guid.new(),Name='Another Project')
+    m.create_entity('IfcBuilding',GlobalId=ifcopenshell.guid.new(),Name='Named Building')
+    d['path'].write_text(m.to_string())
+    monkeypatch.setattr(llm,'chat',lambda *a,**k:pytest.fail('ambiguous scope contacted provider'))
+    assert ask(d,"Count doors in the model 'Named Building'")['status']=='clarification'

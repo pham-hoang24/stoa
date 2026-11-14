@@ -35,7 +35,7 @@ def prepare(question, drawing, prior_target=None):
     # Multiple projects/buildings require explicit submodel selection; a title
     # must never silently turn into a whole-file count.
     if len(projects)==1:names.add(projects[0].Name or '')
-    if len(buildings)==1:names.add(buildings[0].Name or '')
+    if len(projects)<=1 and len(buildings)==1:names.add(buildings[0].Name or '')
     names = {n for n in names if n.strip()}
     scope = re.search(r'\bmodel\s+(?:(?:named|called|titled)\s+)?[\'"‘“]([^\'"’”]+)[\'"’”]',question,re.I)
     if scope is None:
