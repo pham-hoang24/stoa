@@ -23,7 +23,8 @@ Start a fresh owned browser profile in another terminal (macOS example):
 With Node 22+ (global WebSocket), run `node frontend/tests/smoke.mjs`. The test
 creates a chat, uploads PNG/SVG together, selects scope, asks in Finnish, inspects
 a correctly scaled highlight with focus/zoom and pan, follows up with estimate and insufficient-volume
-questions, resumes after reload and deletes the chat. It captures desktop/mobile
+questions, resumes after reload, uploads a generated 51 MiB IFC through the browser,
+and deletes the chats. It captures desktop/mobile
 screenshots under `/private/tmp/stoa42-*.png`, checks mobile width and JS exceptions.
 Stop the owned fixture server/browser afterwards. Fixture storage is
 `/private/tmp/stoa42-browser-data`; use a fresh directory/profile for isolated runs.
