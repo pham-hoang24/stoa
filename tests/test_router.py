@@ -13,4 +13,4 @@ def test_routes_by_source_and_format():
     assert lane("data/ifc_models/a_plan.pdf") == "ifc"
     assert lane("data/ifc_bench/a.ifc") == "ifc"
     assert lane("data/cubicasa5k/a.png") == "vision"
-    assert lane("data/opening_design/Sports_Complex/Sheet A-801.pdf") == "doc"
+    assert lane("data/opening_design/Sports_Complex/Sheet A-801.pdf") == "schedules"
