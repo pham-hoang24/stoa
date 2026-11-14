@@ -7,7 +7,7 @@ from .answer import ABSTAIN_DEFER, Answer
 from .data import Question
 
 # lane name -> module under stoa.lanes (imported lazily: ifcopenshell/ezdxf are heavy)
-LANE_MODULES = {"ifc": "ifc", "swiss": "swiss", "vision": "vision", "doc": "llm"}
+LANE_MODULES = {"ifc": "ifc", "swiss": "swiss", "vision": "vision", "schedules": "schedules", "doc": "llm"}
 
 
 def lane_for(q: Question) -> str:
@@ -16,6 +16,8 @@ def lane_for(q: Question) -> str:
         return "ifc"
     if src == "swiss_dwellings":
         return "swiss"
+    if src == "opening_design":
+        return "schedules"
     if ext in ("png", "jpg", "jpeg") or src == "cubicasa5k":
         return "vision"
     return "doc"  # PDFs/DXF with text: schedules and free-form
