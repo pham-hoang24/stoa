@@ -15,15 +15,15 @@ Injected `answerer(context: dict) -> dict` is synchronous. Context: question, dr
 
 Answer dict: status supported/proposal/estimate/clarification/abstain, value number/string/null, unit optional, explanation, evidence list. Extra serializable fields preserved (calculation, review status, etc). Evidence: drawing_id, page (one-based when paginated), bbox [x0,y0,x1,y1] optional in page source coordinates, entity_id optional. Backend adds evidence.url. Non-abstain substantive answers require scoped resolvable evidence; invalid answer output becomes persisted abstain. Actual provider engine belongs to #41. Default abstains. Exceptions become analysis_error abstains and preserve previous history.
 
-Tests: actual ephemeral loopback HTTP; run with PYTHONPATH=backend/src:src /path/to/.venv/bin/python -m pytest backend/tests -q. Sandbox requires socket permission. No live-provider calls.
+Tests: actual ephemeral loopback HTTP; run with PYTHONPATH=backend/src /path/to/.venv/bin/python -m pytest backend/tests -q. Sandbox requires socket permission. No live-provider calls.
 
 ## Local commands
 
 From the repository root, with its existing dependencies installed:
 
 ```
-PYTHONPATH=backend/src:src .venv/bin/python -m stoa_chat --storage .stoa-chat --frontend frontend --port 8092
-PYTHONPATH=backend/src:src .venv/bin/python -m pytest backend/tests -q
+PYTHONPATH=backend/src .venv/bin/python -m stoa_chat --storage .cache/chat --port 8092
+PYTHONPATH=backend/src .venv/bin/python -m pytest backend/tests -q
 ```
 
 `--frontend` is optional and serves an existing directory at `/`; it does not modify the pitch site. Scripts must be external files because the frontend content policy does not permit inline JavaScript. Original SVG is served with a restrictive sandbox policy; callers should render evidence safely rather than inserting SVG source into HTML.

@@ -1,10 +1,13 @@
-PY := .venv/bin/python -W ignore
+PY := PYTHONPATH=backend/src .venv/bin/python -W ignore
 
-.PHONY: test gate check
+.PHONY: chat test gate check
+chat: ## local drawing chatbot on :8092
+	$(PY) -m stoa_chat
+
 test: ## unit/seam tests
 	$(PY) -m pytest -q
 
-gate: ## no-LLM regression gate on ground truth (needs dataset); fails if accuracy drops under the recorded baseline (src/stoa/eval/baseline.json)
+gate: ## no-LLM regression gate on ground truth (needs dataset); fails if accuracy drops under the recorded baseline (backend/src/stoa/eval/baseline.json)
 	$(PY) -m stoa.eval.run --lane swiss --gate
 	$(PY) -m stoa.eval.run --lane ifc --source ifc_models --gate
 

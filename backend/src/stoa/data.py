@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from stoa.project import ROOT as PROJECT_ROOT
 from pathlib import Path
 
-ROOT = Path(os.environ.get("STOA_DATASET", Path(__file__).resolve().parents[2] / "dataset"))
+ROOT = Path(os.environ.get("STOA_DATASET", PROJECT_ROOT / "dataset"))
 
 
 @dataclass

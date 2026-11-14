@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from stoa.project import ROOT as PROJECT_ROOT
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -12,7 +13,7 @@ from .assets import DEFAULT_DIRECTORY
 from .upload_api import UploadAPI
 
 PAGE = (Path(__file__).parent / "viewer.html").read_text() if (Path(__file__).parent / "viewer.html").exists() else "viewer.html missing"
-EXAMPLES = Path(__file__).resolve().parents[2] / "viewer" / "examples.json"
+EXAMPLES = PROJECT_ROOT / "viewer" / "examples.json"
 RASTER = (".png", ".jpg", ".jpeg")
 # Licence per dataset source (dataset/README.md); per-file credit lives in data/<source>/LICENSE.md and must stay visible.
 LICENCES = {

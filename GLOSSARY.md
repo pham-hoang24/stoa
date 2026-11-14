@@ -58,4 +58,4 @@ A recurring question wording, matched across languages, such as "how many bedroo
 Drawings divided by a hash of their path, never question by question, so sibling questions cannot leak between them.
 
 **Gate**:
-The regression check that fails when lane accuracy drops more than 0.5% under the recorded baseline in `src/stoa/eval/baseline.json`.
+The regression check that fails when lane accuracy drops more than 0.5% under the recorded baseline in `backend/src/stoa/eval/baseline.json`.

@@ -14,12 +14,13 @@ import json
 import os
 import re
 import threading
+from stoa.project import ROOT as PROJECT_ROOT
 from pathlib import Path
 
 from ..answer import Answer, Evidence
 from ..data import Question
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = PROJECT_ROOT
 CACHE = REPO / ".cache" / "llm"
 DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 DEFAULT_BASE = "https://api.featherless.ai/v1"

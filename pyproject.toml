@@ -19,14 +19,19 @@ dependencies = [
 
 [project.scripts]
 stoa = "stoa:main"
+stoa-chat = "stoa_chat.__main__:main"
 
 [dependency-groups]
 dev = ["pytest"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["tests"]
+testpaths = ["backend/tests"]
+pythonpath = ["backend/src", "backend/tests"]
 filterwarnings = ["ignore::FutureWarning"]
+
+[tool.uv.build-backend]
+module-root = "backend/src"
+module-name = ["stoa", "stoa_chat"]
 
 [build-system]
 requires = ["uv_build>=0.13.8,<0.14.0"]
