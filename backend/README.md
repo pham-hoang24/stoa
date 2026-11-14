@@ -47,6 +47,15 @@ Featherless primary selection does not start the NVIDIA fallback chain.
 `model_provenance` reports the producing provider/model, cache status, and
 `fallback_from`/`fallback_reason` when used. Multi-file totals retain per-drawing
 provenance and identify mixed providers explicitly. No credential is included.
+Invalid extraction JSON or evidence receives at most one correction request using
+the same sources and exact preview dimensions. Each correction is a separate model
+call under the same process cap and timeout/fallback policy (up to four live provider
+attempts per drawing when both calls time out on NVIDIA). Provider errors and deliberate
+abstentions do not trigger correction. Exhausted invalid outputs retain no quantity
+and report a safe validation reason. `model_provenance.extraction_attempts` records
+one or two model calls. Visual facts may declare `coordinate_space: normalized_1000`
+for both axes or `preview_pixels`; omitted units retain legacy preview pixels. Only
+explicit normalized coordinates are converted; invalid boxes are never guessed or clamped.
 See the root README for runnable configuration.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.

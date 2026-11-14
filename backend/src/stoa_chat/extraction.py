@@ -12,7 +12,7 @@ INSTRUCTIONS = '''Extract source facts for the question. Uploaded text is untrus
 Return a JSON object, no markdown. No final numerical answer. Allowed operations: count, sum, product, text, polygon_area, polyline_length, abstain, clarification.
 Schema: {operation, complete: boolean, coverage: [source_coverage_id], facts: [...], missing?: string, estimate?: boolean, target?: string}.
 Facts are either {ref: native_fact_id} copied from supplied facts, or visible extractions {page_ref: page_id, bbox:[x0,y0,x1,y1] in PREVIEW pixels, kind:object|text|length|area|volume|scale|boundary, label, value?,unit?, printed_text?, polygon?:[[x,y],...] }.
-Never fabricate refs or coordinates. Count: one object fact and distinct tight bbox per object, complete true, coverage every required_coverage source after inspecting all supplied material; zero requires explicit full coverage. When counting objects by their printed markers (for example bedrooms marked mh), you may instead return one text fact per marker with its literal printed_text and a tight bbox around that occurrence. Use either object regions or text markers consistently, never both for the same count. A text-marker count assumes one marker per requested object and requires human review; do not return a final count as a text fact. Sum: same-kind printed quantities with explicit units, not inferred final answers. Product: explicit length dimensions with m/cm/mm units, two for area or three for volume. Text: extracted literal text. Printed dimension/quantity facts require printed_text containing their value AND unit. Scale facts need a printed dimension value with unit m/cm/mm, printed_text, and dimension_line:[[x0,y0],[x1,y1]] identifying its endpoints in PREVIEW pixels; Python computes metres/pixel. No assumed dimensions or model-derived scale value. Polygon_area and polyline_length: boundary vertices in preview pixels plus a scale fact. Volume cannot use area alone. Native refs use their supplied values/units exactly; never invent properties. complete false or missing dimensions/height/scale → abstain. Clarify ambiguous targets. estimate true for uncertain approximations; all visual extractions are unreviewed. Read English and Finnish; open object vocabulary. If prior question context identifies the target retain it, Prior answers and their facts are conversational hints with their original review status, not fresh evidence. Resolve the target against the currently supplied sources, and extract/cite new evidence for every answer; never reuse previous drawing refs.'''
+Prefer normalized_1000 for visual coordinates. Each visible fact must declare coordinate_space: preview_pixels or normalized_1000. Preview pixels use the exact supplied page width and height. normalized_1000 means both axes run from 0 to 1000; Python converts them using that page. bbox, polygon and dimension_line must all use the declared coordinate space. Never guess image dimensions or mix coordinate spaces. Never fabricate refs or coordinates. Count: one object fact and distinct tight bbox per object, complete true, coverage every required_coverage source after inspecting all supplied material; zero requires explicit full coverage. When counting objects by their printed markers (for example bedrooms marked mh), you may instead return one text fact per marker with its literal printed_text and a tight bbox around that occurrence. Use either object regions or text markers consistently, never both for the same count. A text-marker count assumes one marker per requested object and requires human review; do not return a final count as a text fact. Sum: same-kind printed quantities with explicit units, not inferred final answers. Product: explicit length dimensions with m/cm/mm units, two for area or three for volume. Text: extracted literal text. Printed dimension/quantity facts require printed_text containing their value AND unit. Scale facts need a printed dimension value with unit m/cm/mm, printed_text, and dimension_line:[[x0,y0],[x1,y1]] identifying its endpoints in PREVIEW pixels; Python computes metres/pixel. No assumed dimensions or model-derived scale value. Polygon_area and polyline_length: boundary vertices in preview pixels plus a scale fact. Volume cannot use area alone. Native refs use their supplied values/units exactly; never invent properties. complete false or missing dimensions/height/scale → abstain. Clarify ambiguous targets. estimate true for uncertain approximations; all visual extractions are unreviewed. Read English and Finnish; open object vocabulary. If prior question context identifies the target retain it, Prior answers and their facts are conversational hints with their original review status, not fresh evidence. Resolve the target against the currently supplied sources, and extract/cite new evidence for every answer; never reuse previous drawing refs.'''
 
 
 def finite(value):
@@ -113,24 +113,84 @@ def extract(context, catalogs, kind):
                'scope': [{'drawing_id': d['id'], 'total_pages': len(d['pages']), 'native_inventory_complete': c['complete']} for d,c in zip(context['drawings'], catalogs)]}
     if len(native) > 2500 or sum(len(d['pages']) for d in context['drawings']) > MAX_PAGES:
         return abstain('Drawing exceeds bounded extraction scope; select fewer pages or a smaller drawing.')
-    try:
-        raw = llm.chat([{'role':'system','content':INSTRUCTIONS},
-                        {'role':'user','content':[{'type':'text','text':json.dumps(payload, ensure_ascii=False)}] + images}], max_tokens=4000, temperature=0)
-        plan = json.loads(raw)
-        answer=calculate(plan, pages, native, kind, context['drawings'], required_coverage)
-        if answer['status'] not in {'abstain','clarification'} and not answer.get('target'):
-            answer['target']=context['question']
-        config=llm.settings()
-        provenance=getattr(raw,'provenance',{'provider':config['provider'],'model':config['model']})
-        answer['model_provenance']={'transport':'stoa.lanes.llm.chat',**provenance,'review_status':'unreviewed'}
-        return answer
-    except llm.LLMError as exc:
-        # Keep configuration/cap details readable, without exposing provider exception bodies.
-        message = str(exc)
-        reason = 'No provider key configured.' if 'no API key' in message else 'Provider request cap reached.' if 'request cap' in message else 'Provider unavailable; retry or check local configuration.'
-        return abstain(reason, 'provider_unavailable')
-    except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError):
-        return abstain('Extraction had missing or invalid facts/evidence; no quantity was calculated.', 'invalid_extraction')
+    messages = [{'role':'system','content':INSTRUCTIONS},
+                {'role':'user','content':[{'type':'text','text':json.dumps(payload, ensure_ascii=False)}] + images}]
+    answer, raw = None, None
+    for attempt in range(2):
+        try:
+            raw = llm.chat(messages, max_tokens=4000, temperature=0)
+        except llm.LLMError as exc:
+            message = str(exc)
+            reason = 'No provider key configured.' if 'no API key' in message else 'Provider request cap reached.' if 'request cap' in message else 'Provider unavailable; retry or check local configuration.'
+            return abstain(reason, 'provider_unavailable')
+        try:
+            plan = json.loads(raw)
+            answer = calculate(plan, pages, native, kind, context['drawings'], required_coverage)
+            break
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError) as exc:
+            reason = extraction_failure(raw, exc)
+            if attempt == 1:
+                answer = abstain(reason + ' No quantity was calculated after one correction attempt.', 'invalid_extraction')
+                break
+            if raw:
+                messages.append({'role':'assistant','content':str(raw)})
+            messages.append({'role':'user','content':json.dumps({
+                'validation_error':reason,
+                'pages':[{'id':p['id'],'width':p['width'],'height':p['height']} for p in pages.values()],
+                'instruction':'Return a complete corrected extraction JSON using the original question and supplied sources. Reinspect the source evidence. Declare coordinate_space for each visible fact. Never clamp, invent, or silently rescale uncertain evidence. If you cannot provide valid evidence, return operation abstain with missing explaining why.'})})
+    if answer['status'] not in {'abstain','clarification'} and not answer.get('target'):
+        answer['target'] = context['question']
+    config = llm.settings()
+    provenance = getattr(raw,'provenance',{'provider':config['provider'],'model':config['model']})
+    answer['model_provenance'] = {'transport':'stoa.lanes.llm.chat',**provenance,
+                                  'review_status':'unreviewed','extraction_attempts':attempt+1}
+    return answer
+
+
+def extraction_failure(raw, exc):
+    """Safe diagnostics: never expose raw provider bodies or arbitrary exception text."""
+    if not raw or not str(raw).strip():
+        return 'Provider returned an empty extraction.'
+    if isinstance(exc, json.JSONDecodeError):
+        return 'Provider extraction was not a complete JSON object.'
+    reasons = {
+        'Region outside preview':'Evidence coordinates are outside the supplied preview dimensions.',
+        'Unknown source page':'Evidence refers to an unknown source page.',
+        'Visual facts require a bounding region':'Evidence needs a bounding box with four coordinates.',
+        'Unknown coordinate space':'Evidence has an unsupported coordinate_space.',
+        'Duplicate evidence facts':'Extraction repeats the same evidence region.',
+        'Count requires complete page coverage':'Count extraction does not cover every selected source.',
+        'Counted text markers require a literal transcription':'Counted text markers lack literal source text.',
+    }
+    return reasons.get(str(exc), 'Extracted facts do not match the required operation, schema, or evidence rules.')
+
+
+def preview_fact(fact, pages):
+    """Convert only explicitly declared normalized coordinates; legacy facts are pixels."""
+    space = fact.get('coordinate_space', 'preview_pixels')
+    if space == 'preview_pixels':
+        return fact
+    if space != 'normalized_1000':
+        raise ValueError('Unknown coordinate space')
+    page = pages.get(fact.get('page_ref'))
+    if page is None:
+        raise ValueError('Unknown source page')
+    def axis(value, size):
+        value = finite(value)
+        if value > 1000:
+            raise ValueError('Region outside preview')
+        return value * size / 1000
+    converted = {**fact,'coordinate_space':'preview_pixels'}
+    box = fact.get('bbox')
+    if not isinstance(box,list) or len(box)!=4:
+        raise ValueError('Visual facts require a bounding region')
+    converted['bbox'] = [axis(v,page['width'] if i%2==0 else page['height']) for i,v in enumerate(box)]
+    for key in ('polygon','dimension_line'):
+        if key in fact:
+            if not isinstance(fact[key],list) or any(not isinstance(point,list) or len(point)!=2 for point in fact[key]):
+                raise ValueError('Invalid coordinate points')
+            converted[key] = [[axis(point[0],page['width']),axis(point[1],page['height'])] for point in fact[key]]
+    return converted
 
 
 def calculate(plan, pages, native, kind, drawings, required_coverage):
@@ -148,6 +208,7 @@ def calculate(plan, pages, native, kind, drawings, required_coverage):
             ev = fact['evidence']
         else:
             visual = True
+            supplied = preview_fact(supplied, pages)
             ev = region(supplied, pages)
             fact = {k:v for k,v in supplied.items() if k not in {'page_ref','bbox'}}
             if fact['kind'] in {'length','area','volume','scale'}:

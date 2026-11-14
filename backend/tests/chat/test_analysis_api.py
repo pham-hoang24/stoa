@@ -350,7 +350,7 @@ def test_partial_native_inventory_cannot_be_silently_dropped_from_multi_total(tm
 def test_incomplete_and_fabricated_native_property_extraction_abstains(tmp_path,monkeypatch):
     from stoa.lanes import llm
     def bad(messages,**kwargs):
-        payload=json.loads(messages[-1]['content'][0]['text'])
+        payload=json.loads(next(m['content'][0]['text'] for m in messages if isinstance(m.get('content'),list)))
         ref=payload['facts'][0]['id']+':invented-property'
         return json.dumps({'operation':'sum','complete':True,'facts':[{'ref':ref}]})
     monkeypatch.setattr(llm,'chat',bad)
