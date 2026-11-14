@@ -9,9 +9,16 @@ import cv2
 import numpy as np
 import pytest
 
-from stoa_chat.ocr import extract_text
+from stoa_chat.ocr import extract_text, _installed_languages, OcrUnavailable
 
-needs_tesseract = pytest.mark.skipif(shutil.which("tesseract") is None, reason="tesseract not installed")
+try:
+    exe = shutil.which("tesseract")
+    installed = _installed_languages(exe) if exe else set()
+except OcrUnavailable:
+    installed = set()
+needs_tesseract = pytest.mark.skipif(not installed, reason="usable tesseract not installed")
+needs_english = pytest.mark.skipif("eng" not in installed, reason="tesseract English data not installed")
+needs_finnish = pytest.mark.skipif(not {"eng","fin"} <= installed, reason="tesseract English/Finnish data not installed")
 
 
 def page(*words, size=(1000, 300)):
@@ -25,9 +32,9 @@ def page(*words, size=(1000, 300)):
     return png.tobytes()
 
 
-@needs_tesseract
+@needs_english
 def test_token_carries_literal_text_and_a_box_in_input_pixels():
-    tokens = extract_text(page(("KITCHEN", (100, 150))))
+    tokens = extract_text(page(("KITCHEN", (100, 150))), languages=["eng"])
     token = next(t for t in tokens if t["text"] == "KITCHEN")
     x0, y0, x1, y1 = token["bbox"]
     # the word was drawn from x=100 with a baseline at y=150, about 36px cap height
@@ -44,7 +51,6 @@ def test_missing_engine_is_an_explicit_error_not_an_empty_result(monkeypatch):
         extract_text(page(("KITCHEN", (100, 150))))
 
 
-@needs_tesseract
 def test_bytes_that_are_not_an_image_are_rejected():
     with pytest.raises(ValueError, match="image"):
         extract_text(b"definitely not a png")
@@ -56,12 +62,12 @@ def test_unknown_language_is_rejected_by_name():
         extract_text(page(("KITCHEN", (100, 150))), languages=["eng", "klingon"])
 
 
-@needs_tesseract
+@needs_english
 def test_a_blank_page_has_no_tokens():
-    assert extract_text(page()) == []
+    assert extract_text(page(), languages=["eng"]) == []
 
 
-@needs_tesseract
+@needs_finnish
 def test_dimensions_and_finnish_labels_come_back_exactly_as_printed():
     png = page(("MAKUUHUONE", (30, 100)), ("12,5", (30, 200)), ("3.5x4.2", (800, 200)), ("KPH/WC", (900, 100)), size=(1400, 300))
     texts = {t["text"] for t in extract_text(png)}
