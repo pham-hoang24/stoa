@@ -4,7 +4,8 @@ let current = null,
   selected = new Set(),
   busy = false,
   evidenceTrigger = null,
-  uploadLimits = null;
+  uploadLimits = null,
+  sourcesOpen = true;
 const formatLimit = (bytes) =>
   bytes >= 1024 * 1024 ? `${bytes / (1024 * 1024)} MiB` : `${bytes} bytes`;
 const element = (tag, cls, text) => {
@@ -24,17 +25,47 @@ async function api(path, options = {}) {
 function notice(text = "") {
   $("notice").textContent = text;
 }
+function setSourcesOpen(open) {
+  sourcesOpen = open;
+  $("sources").classList.toggle("collapsed", !open);
+  $("sources-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+  updateSourcesSummary();
+}
+function updateSourcesSummary() {
+  const total = current?.drawings.length || 0;
+  const picked = selected.size;
+  $("sources-summary").textContent = total
+    ? `${picked} of ${total} selected`
+    : "";
+}
+function chatName(chat) {
+  const drawings = chat.drawings || [];
+  if (drawings.length)
+    return (
+      drawings[0].filename +
+      (drawings.length > 1 ? ` + ${drawings.length - 1} more` : "")
+    );
+  return chat.title || "Untitled conversation";
+}
 function controls() {
-  $("upload").disabled = busy || !current || !uploadLimits;
+  document.body.classList.toggle("busy", busy);
+  $("upload").disabled = busy || !uploadLimits;
+  document
+    .querySelectorAll(".dropzone")
+    .forEach((n) => n.classList.toggle("disabled", $("upload").disabled));
   $("send").disabled = busy || !current || !selected.size;
   $("new-chat").disabled = busy;
   $("delete-chat").disabled = busy;
+  $("sources-toggle").disabled = busy;
   document
     .querySelectorAll(".drawing input,.chat-button")
     .forEach((n) => (n.disabled = busy));
   $("scope").textContent = selected.size
     ? `Asking about ${selected.size} selected drawing${selected.size === 1 ? "" : "s"} · Scope carries into follow-ups`
-    : "Select drawings to ask a question";
+    : current?.drawings.length
+      ? "Select a drawing to ask about"
+      : "Add a drawing to start asking";
+  updateSourcesSummary();
 }
 async function loadChats() {
   const chats = await api("/api/chats");
@@ -43,10 +74,21 @@ async function loadChats() {
     const b = element(
       "button",
       "chat-button" + (current?.id === chat.id ? " active" : ""),
-      chat.title || "Untitled conversation",
     );
     b.setAttribute("aria-current", current?.id === chat.id ? "page" : "false");
-    b.append(element("span", "chat-date", "Saved locally"));
+    const questions = (chat.messages || []).filter(
+        (m) => m.role === "user",
+      ).length,
+      sources = (chat.drawings || []).length;
+    b.title = chatName(chat);
+    b.append(
+      element("span", "chat-name", chatName(chat)),
+      element(
+        "span",
+        "chat-date",
+        `${sources} drawing${sources === 1 ? "" : "s"} · ${questions} question${questions === 1 ? "" : "s"}`,
+      ),
+    );
     b.onclick = () => run(async () => openChat(chat.id));
     $("chats").append(b);
   }
@@ -67,20 +109,22 @@ function renderDrawings() {
       input.checked ? selected.add(drawing.id) : selected.delete(drawing.id);
       controls();
     };
-    label.append(
-      input,
-      element("span", "", drawing.filename),
-      element("span", "filetype", drawing.format),
-    );
+    const name = element("span", "", drawing.filename);
+    name.title = drawing.filename;
+    label.append(input, name, element("span", "filetype", drawing.format));
     $("drawing-list").append(label);
   }
-  $("drawing-count").textContent = current?.drawings.length || 0;
+  $("drawing-count").textContent = `(${current?.drawings.length || 0})`;
+  $("sources").hidden = !current?.drawings.length;
   const limits = uploadLimits
     ? `IFC up to ${formatLimit(uploadLimits.ifc)}; other formats up to ${formatLimit(uploadLimits.default)}.`
-    : "Loading upload limits…";
-  $("upload-hint").textContent = current
-    ? `Select the drawings relevant to your next question. Multiple views may overlap; confirm independence before totaling. ${limits}`
-    : `PNG · JPEG · PDF · IFC · DXF · SVG. ${limits} Create a conversation to begin.`;
+    : "";
+  $("upload-hint").textContent =
+    `Select the drawings relevant to your next question. Views can overlap; confirm they are independent before totaling. ${limits}`;
+  const dropLimits = document.getElementById("drop-limits");
+  if (dropLimits)
+    dropLimits.textContent = `PNG, JPEG, PDF, IFC, DXF or SVG. ${limits}`;
+  updateSourcesSummary();
 }
 const labels = {
   supported: "Native · source supported",
@@ -94,54 +138,138 @@ function details(label, value) {
   d.append(element("summary", "", label), jsonBlock(value));
   return d;
 }
+function sampleSheet() {
+  const ns = "http://www.w3.org/2000/svg",
+    wrap = document.createDocumentFragment(),
+    svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "sample-sheet");
+  svg.setAttribute("viewBox", "0 0 440 250");
+  svg.setAttribute("role", "img");
+  svg.setAttribute(
+    "aria-label",
+    "Sample floor plan with one door outlined by an orange evidence box",
+  );
+  const add = (tag, attrs) => {
+    const n = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    svg.append(n);
+    return n;
+  };
+  const wall = { fill: "none", stroke: "#294d3c", "stroke-width": 3 };
+  add("rect", { x: 30, y: 30, width: 260, height: 190, ...wall });
+  add("line", { x1: 170, y1: 30, x2: 170, y2: 130, ...wall });
+  add("line", { x1: 30, y1: 130, x2: 170, y2: 130, ...wall });
+  add("line", { x1: 290, y1: 80, x2: 410, y2: 80, stroke: "#8a9a83" });
+  add("line", { x1: 290, y1: 120, x2: 380, y2: 120, stroke: "#8a9a83" });
+  add("line", { x1: 290, y1: 160, x2: 400, y2: 160, stroke: "#8a9a83" });
+  add("path", {
+    d: "M170 130 A24 24 0 0 1 194 106",
+    fill: "none",
+    stroke: "#294d3c",
+    "stroke-width": 1.5,
+  });
+  add("rect", {
+    x: 160,
+    y: 100,
+    width: 42,
+    height: 36,
+    fill: "#e5aa342c",
+    stroke: "#c78416",
+    "stroke-width": 2,
+  });
+  const label = add("text", {
+    x: 210,
+    y: 98,
+    "font-size": 12,
+    fill: "#6f4a18",
+    "font-family": "sans-serif",
+  });
+  label.textContent = "Evidence box";
+  wrap.append(svg);
+  const caption = element(
+    "p",
+    "sample-caption",
+    "Illustration. Every answer is tied to a box like this on your sheet.",
+  );
+  wrap.append(caption);
+  return wrap;
+}
 function renderMessages() {
   const list = $("messages");
   list.replaceChildren();
   if (!current?.messages.length) {
-    const welcome = element("div", "welcome");
+    const hasDrawings = !!current?.drawings.length,
+      welcome = element("div", "welcome");
     welcome.append(
-      element("div", "eyebrow", "FROM DRAWING TO UNDERSTANDING"),
       element(
         "h2",
         "",
-        current
-          ? "Start with a drawing.\nFollow the evidence."
-          : "Your drawings.\nA conversation away.",
+        hasDrawings
+          ? "Ask about the selected drawings."
+          : "Add a drawing to start.",
       ),
       element(
         "p",
         "",
-        "Upload a drawing set and ask about quantities, rooms, dimensions or construction details. Inspect the source behind every answer.",
+        "Ask how many doors, rooms or square metres a sheet shows. Each answer points to a box on the drawing or an IFC element, and Stoa says so when the drawing does not support an answer.",
       ),
     );
-    const examples = element("div", "examples");
-    for (const text of [
-      "Count the rooms",
-      "What is the floor area?",
-      "Show drawing details",
-    ]) {
-      const b = element("button", "", text);
-      b.onclick = () => {
-        $("question").value = text;
-        $("question").focus();
+    if (hasDrawings) {
+      const examples = element("div", "examples");
+      for (const text of [
+        "Count the rooms",
+        "What is the floor area?",
+        "Show drawing details",
+      ]) {
+        const b = element("button", "", text);
+        b.onclick = () => {
+          $("question").value = text;
+          $("question").focus();
+        };
+        examples.append(b);
+      }
+      welcome.append(examples);
+    } else {
+      const zone = element("label", "dropzone");
+      zone.htmlFor = "upload";
+      zone.append(
+        element("strong", "", "Add a drawing"),
+        element("span", "", "Choose files or drop them here."),
+      );
+      const limits = element("span", "", "");
+      limits.id = "drop-limits";
+      zone.append(limits);
+      zone.ondragover = (e) => {
+        e.preventDefault();
+        zone.classList.add("dragover");
       };
-      examples.append(b);
+      zone.ondragleave = () => zone.classList.remove("dragover");
+      zone.ondrop = (e) => {
+        e.preventDefault();
+        zone.classList.remove("dragover");
+        if (busy || !uploadLimits || !e.dataTransfer?.files.length) return;
+        $("upload").files = e.dataTransfer.files;
+        $("upload").dispatchEvent(new Event("change"));
+      };
+      welcome.append(zone, sampleSheet());
     }
-    welcome.append(examples);
     list.append(welcome);
+    renderDrawings();
+    controls();
     return;
   }
   for (const message of current.messages) {
     const card = element("article", "message " + message.role);
     if (message.role === "user") {
       card.append(
-        element("div", "message-label", "YOU"),
+        element("div", "message-label", "You"),
         element("div", "", message.content || message.question || ""),
       );
     } else {
       const a = message.answer || {},
         error = a.error || a.error_code;
-      const label = element("div", "message-label", "STOA");
+      if (a.status === "abstain") card.classList.add("abstained");
+      const label = element("div", "message-label", "Stoa");
       label.append(
         element(
           "span",
@@ -203,13 +331,7 @@ function renderMessages() {
   list.scrollTop = list.scrollHeight;
 }
 function resetEvidence() {
-  $("evidence").replaceChildren(
-    element(
-      "div",
-      "evidence-empty",
-      "Select an answer reference to inspect its source and calculation.",
-    ),
-  );
+  $("evidence").replaceChildren();
   closeEvidence();
 }
 async function openChat(id) {
@@ -217,8 +339,9 @@ async function openChat(id) {
   selected = new Set(current.selected_drawing_ids || []);
   if (!current.messages.length)
     for (const d of current.drawings) selected.add(d.id);
-  $("chat-title").textContent = current.title || "Untitled conversation";
+  $("chat-title").textContent = chatName(current);
   $("delete-chat").hidden = false;
+  setSourcesOpen(!current.messages.length);
   renderDrawings();
   renderMessages();
   await loadChats();
@@ -428,23 +551,38 @@ async function run(task) {
     controls();
   }
 }
+$("sources-toggle").onclick = () => {
+  if (!busy) setSourcesOpen(!sourcesOpen);
+};
+$("upload").onclick = (event) => {
+  if (busy || !uploadLimits) {
+    event.preventDefault();
+    notice(
+      !uploadLimits
+        ? "Upload limits are still loading. Try again in a moment."
+        : "Wait for the current action to finish.",
+    );
+  }
+};
+const createChat = () =>
+  api("/api/chats", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title:
+        "Drawing review · " +
+        new Date().toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+    }),
+  });
 $("new-chat").onclick = () =>
   run(async () => {
-    const chat = await api("/api/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title:
-          "Drawing review · " +
-          new Date().toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-      }),
-    });
+    const chat = await createChat();
     await openChat(chat.id);
     $("question").focus();
   });
@@ -452,6 +590,9 @@ $("upload").onchange = () =>
   run(async () => {
     const files = [...$("upload").files],
       failures = [];
+    if (!files.length) return;
+    if (!current) await openChat((await createChat()).id);
+    setSourcesOpen(true);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       notice(`Uploading ${i + 1}/${files.length}: ${file.name}…`);
@@ -474,7 +615,10 @@ $("upload").onchange = () =>
       }
     }
     current = await api("/api/chats/" + current.id);
+    $("chat-title").textContent = chatName(current);
     renderDrawings();
+    if (!current.messages.length) renderMessages();
+    await loadChats();
     $("upload").value = "";
     notice(
       failures.length
@@ -492,6 +636,7 @@ $("ask").onsubmit = (event) => {
         "processing",
         "Reading selected drawings and checking evidence…",
       );
+    setSourcesOpen(false);
     $("messages").append(pending);
     try {
       await api(`/api/chats/${current.id}/questions`, {
@@ -508,6 +653,9 @@ $("ask").onsubmit = (event) => {
     }
   });
 };
+$("question").onfocus = () => {
+  if (current?.drawings.length) setSourcesOpen(false);
+};
 $("question").onkeydown = (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
@@ -522,8 +670,9 @@ $("confirm-delete").onclick = () => {
     await api("/api/chats/" + current.id, { method: "DELETE" });
     current = null;
     selected.clear();
-    $("chat-title").textContent = "A clearer view of your drawings.";
+    $("chat-title").textContent = "Drawing desk";
     $("delete-chat").hidden = true;
+    setSourcesOpen(true);
     renderDrawings();
     renderMessages();
     resetEvidence();
@@ -533,10 +682,21 @@ $("confirm-delete").onclick = () => {
 $("close-evidence").onclick = closeEvidence;
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeEvidence();
+  else if (
+    e.key === "/" &&
+    !e.metaKey &&
+    !e.ctrlKey &&
+    !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)
+  ) {
+    e.preventDefault();
+    $("question").focus();
+  }
 });
+setSourcesOpen(true);
 renderMessages();
 run(async () => {
   uploadLimits = (await api("/api/config", { cache: "no-store" })).upload_limits;
   renderDrawings();
+  if (!current) renderMessages();
   await loadChats();
 });
