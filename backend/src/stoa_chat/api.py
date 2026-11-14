@@ -51,6 +51,9 @@ class Store:
 def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=50 * 1024 * 1024, allowed_origins=(), static_dir=None):
     """Create a local server; the caller owns serve_forever/shutdown/server_close."""
     store = Store(root)
+    if answerer is None:
+        from .analysis import HybridAnswerer
+        answerer = HybridAnswerer()
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
