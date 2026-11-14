@@ -14,7 +14,7 @@ def preview(drawing, page=1):
         raise ValueError('Source page does not exist')
     format = drawing['format']
     if format in {'png', 'jpeg'}:
-        image = cv2.imdecode(np.frombuffer(drawing['path'].read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = cv2.imdecode(np.frombuffer(drawing['path'].read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
     elif format in {'pdf', 'svg'}:
         # SVG was validated during ingest. MuPDF rasterizes without browser scripts
         # or network resource resolution; uploaded SVG never enters the DOM.
@@ -30,6 +30,8 @@ def preview(drawing, page=1):
             image = cv2.imdecode(np.frombuffer(pixmap.tobytes('png'), dtype=np.uint8), cv2.IMREAD_COLOR)
     else:
         raise ValueError('No spatial preview available; inspect original native entities')
+    if image is None:
+        raise ValueError('Cannot decode preview')
     height, width = image.shape[:2]
     factor = min(1, MAX_SIDE / max(width, height))
     if factor < 1:
