@@ -40,22 +40,35 @@ at most two live attempts, which
 share the process request cap; cached replies remain free and endpoint-specific.
 
 `--llm-timeout-seconds` overrides positive finite `STOA_LLM_TIMEOUT_SECONDS`
-(default 60 per attempt). NVIDIA uses `STOA_NVIDIA_BASE_URL`/`STOA_NVIDIA_MODEL`
+(default 60 per attempt; chat extraction waits at least 120 s). Extraction calls ask
+reasoning models to skip their hidden reasoning pass (`enable_thinking: false`), which
+otherwise consumed the output budget and returned empty replies. Empty or truncated
+replies are never cached, and replies that fail validation are evicted from the cache.
+If NVIDIA times out and the fallback has no key, the answer says so. NVIDIA uses `STOA_NVIDIA_BASE_URL`/`STOA_NVIDIA_MODEL`
 overrides, Modal uses `MODAL_API_KEY` with `STOA_MODAL_BASE_URL`/`STOA_MODAL_MODEL`,
 and Featherless retains its existing `STOA_LLM_*` overrides. Explicit Modal or
 Featherless primary selection does not start the NVIDIA fallback chain.
 `model_provenance` reports the producing provider/model, cache status, and
 `fallback_from`/`fallback_reason` when used. Multi-file totals retain per-drawing
 provenance and identify mixed providers explicitly. No credential is included.
-Invalid extraction JSON or evidence receives at most one correction request using
-the same sources and exact preview dimensions. Each correction is a separate model
+The JSON object is extracted from the reply even when wrapped in markdown fences or
+prose. Invalid extraction JSON or evidence receives at most one correction request using
+the same sources and exact preview dimensions (an empty reply is simply resampled). Each correction is a separate model
 call under the same process cap and timeout/fallback policy (up to four live provider
 attempts per drawing when both calls time out on NVIDIA). Provider errors and deliberate
 abstentions do not trigger correction. Exhausted invalid outputs retain no quantity
 and report a safe validation reason. `model_provenance.extraction_attempts` records
 one or two model calls. Visual facts may declare `coordinate_space: normalized_1000`
 for both axes or `preview_pixels`; omitted units retain legacy preview pixels. Only
-explicit normalized coordinates are converted; invalid boxes are never guessed or clamped.
+explicit normalized coordinates are converted. A box overshooting its view by at most 2%
+of the side is clamped and marked `clamped: true`; anything further is rejected, never guessed.
+Lookup, yes/no and descriptive questions may use operation `answer`: a concise reply
+accepted only with at least one valid cited region (with `printed_text` where text was
+read). Counts, sums, products and areas are still calculated by Python from facts; for
+`answer` and `text`, one malformed citation is dropped (and reported in the explanation)
+instead of discarding the answer. When local OCR words spell a cited `printed_text` near
+the model's box, the evidence box snaps to those words (`bbox_source: 'ocr'`, original
+kept as `model_bbox`).
 See the root README for runnable configuration.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
@@ -79,8 +92,10 @@ abstain: absence of IfcDoor occurrences does not prove the physical absence of d
 Missing GlobalIds cannot silently reduce a complete count. Native scope errors
 suggest narrowing elements rather than selecting nonexistent IFC pages.
 
-PNG/JPEG uploads larger than 1,600 pixels on either axis use a contextual overview
-and lossless 1,400-pixel crops from the normalized original, with 20% overlap.
+PNG/JPEG questions use one full view of up to 3,000 pixels per side (the model
+downsamples internally, so more pixels do not help). Only count questions on images
+larger than 3,000 pixels use a contextual overview and lossless 1,400-pixel crops from
+the normalized original, with 20% overlap.
 Each crop has a source transform and a nonoverlapping ownership core. Counts must
 cite complete objects in the owning detail view; the overview cannot supply count
 facts. Clipped regions, missing coverage and conflicting overlap detections cannot
@@ -89,14 +104,16 @@ source coordinates; repeated labels at different positions remain distinct.
 
 Count requests inspect every required crop in sequential batches of at most three
 crops plus the overview. Each batch retains the existing correction, timeout-only
-fallback and shared process cap. An exhausted cap or failed batch stops the total.
+fallback and shared process cap. A batch with invalid output is retried once
+(`image_processing.retried_batches`); completed batches are kept. An exhausted cap or a
+batch that fails again stops the total.
 `image_processing` records required/completed region IDs, source bounds and duplicate
 reconciliation; `model_provenance.per_batch` retains actual provider/cache/fallback
 metadata. The chat displays completed versus required image regions. Coverage records
 successful extraction processing, not independently verified detection accuracy.
 
-Initial bounds are 64 detail crops, 3,000 aggregate count detections, and 12 detail
-crops jointly for text/measurement questions. Exceeding a bound abstains explicitly;
+Initial bounds are 64 detail crops and 3,000 aggregate count detections. Exceeding a
+bound abstains explicitly;
 no crops or detections are silently omitted. Geometry and calibration from different
 views are converted to the original source frame before calculation. Smaller raster
 uploads keep their existing single-view path. PDF/SVG rendering and IFC behavior are

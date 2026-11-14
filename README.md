@@ -41,15 +41,16 @@ uv run stoa-chat --llm-provider nvidia --llm-fallback modal
 # Or: --llm-fallback featherless
 ```
 
-The timeout defaults to **60 seconds per provider attempt**; override it with
-`--llm-timeout-seconds 30`. Equivalent environment options are
+The timeout defaults to **60 seconds per provider attempt** (chat extraction calls
+wait at least 120 seconds); override it with `--llm-timeout-seconds 30`. Equivalent environment options are
 `STOA_LLM_PROVIDER=nvidia`, `STOA_LLM_FALLBACK=modal`, and
 `STOA_LLM_TIMEOUT_SECONDS=60`. Use fallback `none` to disable automatic fallthrough.
 Only SDK timeouts or HTTP 408/504 activate fallback. Authentication errors,
 rate limits, connection failures, HTTP 503 and other errors remain explicit.
 A secondary timeout stops the chain; there are at most two live attempts per model call.
 Each attempt counts against `STOA_LLM_MAX_REQUESTS` (default 200 per process).
-Cached replies remain free, separated by provider/endpoint/model; fallback results
+Cached replies remain free, separated by provider/endpoint/model; empty, truncated or
+unusable replies are never replayed from the cache. Fallback results
 are never cached as NVIDIA answers. Answer provenance identifies the actual
 provider/model and records timeout fallthrough.
 
