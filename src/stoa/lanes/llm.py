@@ -1,7 +1,10 @@
 """LLM lane (Featherless, OpenAI-compatible): vision for raster plans, text/PDF/IFC-summary QA.
 
-Config via env (.env, never committed): FEATHERLESS_API_KEY, STOA_LLM_MODEL, STOA_LLM_BASE_URL.
-Every call is cached on disk under .cache/llm by hash of (model, messages).
+Config is read at call time from env (.env, never committed):
+  STOA_LLM_API_KEY (or FEATHERLESS_API_KEY), STOA_LLM_BASE_URL (any OpenAI-compatible endpoint, default Featherless),
+  STOA_LLM_MODEL, STOA_LLM_MAX_REQUESTS (live-request cap per process, default 200; 0 = no live calls).
+Every call is cached on disk under .cache/llm by hash of (model, messages). Cached replies are free and uncapped.
+There are no automatic retries: one live call is one billed request. Failures raise LLMError with a readable reason.
 """
 from __future__ import annotations
 
@@ -18,10 +21,29 @@ from ..data import Question
 
 REPO = Path(__file__).resolve().parents[3]
 CACHE = REPO / ".cache" / "llm"
-MODEL = os.environ.get("STOA_LLM_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
-BASE = os.environ.get("STOA_LLM_BASE_URL", "https://api.featherless.ai/v1")
+DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+DEFAULT_BASE = "https://api.featherless.ai/v1"
+DEFAULT_MAX_REQUESTS = 200
 _USAGE = {"calls": 0, "cached": 0, "prompt_tokens": 0, "completion_tokens": 0}
 _LOCK = threading.Lock()
+
+
+class LLMError(RuntimeError):
+    """Provider unavailable, misconfigured or over the request cap. The message says which."""
+
+
+def settings() -> dict:
+    """Provider settings from the environment right now (not frozen at import)."""
+    _env()
+    key = os.environ.get("STOA_LLM_API_KEY") or os.environ.get("FEATHERLESS_API_KEY")
+    return {"model": os.environ.get("STOA_LLM_MODEL", DEFAULT_MODEL), "base_url": os.environ.get("STOA_LLM_BASE_URL", DEFAULT_BASE),
+            "api_key": key, "max_requests": int(os.environ.get("STOA_LLM_MAX_REQUESTS", DEFAULT_MAX_REQUESTS))}
+
+
+def reset_usage() -> None:
+    with _LOCK:
+        for k in _USAGE:
+            _USAGE[k] = 0
 
 
 def _count(**inc: int) -> None:
@@ -48,18 +70,32 @@ def _env() -> None:
                 os.environ.setdefault(k.strip(), v.strip())
 
 
-def chat(messages: list[dict], model: str = MODEL, max_tokens: int = 600, temperature: float = 0.0) -> str:
+def chat(messages: list[dict], model: str | None = None, max_tokens: int = 600, temperature: float = 0.0) -> str:
+    cfg = settings()
+    model = model or cfg["model"]
     key = hashlib.sha256(json.dumps([model, messages, max_tokens, temperature], sort_keys=True).encode()).hexdigest()
     cf = CACHE / f"{key}.txt"
     if cf.exists():
         _count(cached=1)
         return cf.read_text()
-    _env()
-    from openai import OpenAI
-    client = OpenAI(base_url=BASE, api_key=os.environ["FEATHERLESS_API_KEY"], timeout=180)
-    out = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+    if not cfg["api_key"]:
+        raise LLMError("no API key: set STOA_LLM_API_KEY or FEATHERLESS_API_KEY")
+    with _LOCK:  # reserve the request before sending so parallel workers cannot overshoot the cap
+        if _USAGE["calls"] >= cfg["max_requests"]:
+            raise LLMError(f"request cap reached ({cfg['max_requests']} live requests; raise STOA_LLM_MAX_REQUESTS)")
+        _USAGE["calls"] += 1
+    import openai
+    client = openai.OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"], timeout=180, max_retries=0)
+    try:
+        out = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+    except openai.AuthenticationError as e:
+        raise LLMError(f"provider rejected the API key ({cfg['base_url']}): {e}") from e
+    except openai.RateLimitError as e:
+        raise LLMError(f"provider rate limit or quota hit ({cfg['base_url']}); no retry attempted: {e}") from e
+    except openai.APIError as e:
+        raise LLMError(f"provider error from {cfg['base_url']} ({type(e).__name__}): {e}") from e
     u = getattr(out, "usage", None)
-    _count(calls=1, prompt_tokens=getattr(u, "prompt_tokens", 0) or 0, completion_tokens=getattr(u, "completion_tokens", 0) or 0)
+    _count(prompt_tokens=getattr(u, "prompt_tokens", 0) or 0, completion_tokens=getattr(u, "completion_tokens", 0) or 0)
     text = out.choices[0].message.content or ""
     CACHE.mkdir(parents=True, exist_ok=True)
     cf.write_text(text)
