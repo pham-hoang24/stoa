@@ -27,10 +27,10 @@ export function Run() {
       <div className="wrap grid items-center gap-12 lg:grid-cols-[1fr_1fr] lg:gap-20">
         <div>
           <h2 className="text-[clamp(2.2rem,4.8vw,4rem)] leading-[1.02] font-semibold tracking-[-0.035em]">
-            Have a drawing in mind? Ask it a question.
+            Take a question from the sheet to its source.
           </h2>
           <p className="mt-6 max-w-[44ch] text-lg leading-relaxed text-foreground/75">
-            The viewer runs on your machine. Pick a drawing, type a question, click the answer to see where it came from.
+            Run the local viewer, choose your drawing, ask a question and inspect its source. You can also try the verified Swiss Dwellings questions above before installing anything.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button render={<a href={REPO} />} nativeButton={false} className="h-11 rounded-full px-6 text-[15px]">

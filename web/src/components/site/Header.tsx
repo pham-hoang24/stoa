@@ -3,11 +3,11 @@ import { Button } from "@/components/ui/button"
 
 const NAV = [
   { href: "#demo", label: "Demo" },
-  { href: "#why", label: "Why" },
+  { href: "#scenarios", label: "Scenarios" },
   { href: "#lanes", label: "Lanes" },
   { href: "#method", label: "Method" },
   { href: "#measured", label: "Measured" },
-  { href: "#notes", label: "Notes" },
+
 ]
 
 export function Header() {

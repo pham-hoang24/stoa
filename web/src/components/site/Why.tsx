@@ -3,7 +3,7 @@ export function Why() {
     <section id="why" className="border-t py-[clamp(4rem,9vw,8rem)]">
       <div className="wrap grid gap-8 lg:grid-cols-[4fr_7fr] lg:gap-16">
         <h2 className="text-[clamp(1.9rem,3.6vw,3rem)] leading-[1.05] font-semibold tracking-[-0.03em]">
-          A takeoff is only as good as the count behind it
+          Answers are useful only when you can check them
         </h2>
         <div className="max-w-[58ch] space-y-5 text-lg leading-relaxed text-foreground/80">
           <p>

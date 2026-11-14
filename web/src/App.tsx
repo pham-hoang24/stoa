@@ -1,6 +1,7 @@
 import { Footer } from "@/components/site/Footer"
 import { Header } from "@/components/site/Header"
 import { Hero } from "@/components/site/Hero"
+import { ScenarioShowcase } from "@/components/site/ScenarioShowcase"
 import { Lanes } from "@/components/site/Lanes"
 import { Measured } from "@/components/site/Measured"
 import { Method } from "@/components/site/Method"
@@ -22,6 +23,7 @@ export default function App() {
       <main className="relative z-10">
         <Hero />
         <Why />
+        <ScenarioShowcase />
         <Lanes />
         <Method />
         <Measured />
