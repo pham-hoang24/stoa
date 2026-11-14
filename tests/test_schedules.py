@@ -124,6 +124,13 @@ def test_unsupported_filter_does_not_turn_into_total(pdf):
     assert ask("How many doors are fire-rated?").value is None
 
 
+def test_missing_filter_column_does_not_establish_a_zero_count(pdf):
+    save, ask = pdf
+    save()
+    assert ask("How many doors in room 118 are scheduled?").value is None
+    assert ask("How many doors have frame material AL-1?").value is None
+
+
 def test_scanned_schedule_with_vector_title_does_not_trigger_ocr_or_guess(pdf):
     save, ask = pdf
     save(raster=True)
@@ -213,3 +220,15 @@ def test_real_schedule_cases(index, expected, unit):
     a = answer(q, q.abspath)
     assert a.value == expected and a.unit == unit
     assert a.evidence and all(e.page == 0 and e.bbox for e in a.evidence)
+
+
+def test_number_schedule_is_distinct_from_weighted_types_on_the_same_sheet():
+    if not (data.ROOT / "questions.jsonl").exists():
+        pytest.skip("preview unavailable")
+    qs = [q for q in data.load_questions() if q.source == "opening_design"]
+    source = next((q for q in qs if q.path.endswith("A700 - SCHEDULES.pdf")), None)
+    if source is None:
+        pytest.skip("A700 unavailable")
+    q = Question(source.path, "How many doors (door numbers) are listed in the door schedule?")
+    a = answer(q, q.abspath)
+    assert a.value == 48 and len(a.evidence) == 48

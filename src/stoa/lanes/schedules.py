@@ -47,9 +47,15 @@ def _select(book: Book, kind: str, text: str, original: str):
         raise ValueError("no readable schedule of the requested kind; scans and plan-symbol counts are unsupported")
     selected = list(rows)
     constrained = False
+
+    def require(*fields):
+        if any(key not in row.values for row in rows for key in fields):
+            raise ValueError("requested filter column is unavailable in this schedule")
+
     room = re.search(r"\broom\s+(\d+)\b", text)
     if room:
         key = "id" if kind == "rooms" else "room"
+        require(key)
         selected = [r for r in selected if r.values.get(key) == room[1]]
         constrained = True
     identifier = re.search(r"\bdoor\s+(\d+\.[a-z]\d*)\b", text)
@@ -67,6 +73,7 @@ def _select(book: Book, kind: str, text: str, original: str):
         codes = re.findall(r"\bU\d+(?:-[A-Z]{1,2})?\b" if kind == "door_types" else r"\b[A-Z]\d+\b", original.upper())
         if codes:
             field = "id" if kind == "door_types" else "door_type"
+            require(field)
             selected = [r for r in selected if r.values.get(field) in codes]
             constrained = True
     elif kind == "windows":
@@ -79,9 +86,11 @@ def _select(book: Book, kind: str, text: str, original: str):
         code = re.search(r"\b([FBCW]\d+)\b", original.upper())
         if code:
             if "four walls" in text:
+                require("north", "south", "east", "west")
                 selected = [r for r in selected if all(r.values.get(k) == code[1] for k in ("north", "south", "east", "west"))]
             else:
                 field = "floor" if code[1].startswith("F") else "base" if code[1].startswith("B") else "ceiling" if code[1].startswith("C") else "north"
+                require(field)
                 selected = [r for r in selected if code[1] in re.findall(r"\b[A-Z]\d+\b", r.values.get(field, ""))]
             constrained = True
         if "named" in text or "labelled" in text:
@@ -97,10 +106,12 @@ def _select(book: Book, kind: str, text: str, original: str):
     materials = re.findall(r"\b(?:WD|STL|AL|GL)-\d+\b", original.upper())
     if materials:
         field = "frame_material" if "frame" in text else "door_material"
+        require(field)
         selected = [r for r in selected if any(k in re.findall(r"[A-Z]+-\d+", r.values.get(field, "")) for k in materials)]
         constrained = True
     note = re.search(r"\bnote\s+([a-z])\b", text)
     if note:
+        require("notes")
         selected = [r for r in selected if re.fullmatch(r"[A-Z](?:\s*,\s*[A-Z])*", r.values.get("notes", ""))
                     and note[1].upper() in r.values["notes"]]
         constrained = True
@@ -109,10 +120,12 @@ def _select(book: Book, kind: str, text: str, original: str):
         fields = ("width", "height") if len(dims) == 2 else ("height",) if re.search(r"high|height", text) else ("width",)
         if len(dims) != len(fields):
             raise ValueError("ambiguous dimension filter")
+        require(*fields)
         selected = [r for r in selected if all(_dimension(r.values.get(k, "")) == _dimension(d) for k, d in zip(fields, dims))]
         constrained = True
     floor = re.search(r"\b(\d+(?:st|nd|rd|th)) floor\b", text)
     if floor:
+        require("description")
         selected = [r for r in selected if floor[0].upper() in r.values.get("description", "")]
         constrained = True
     if kind == "door_types" and not re.search(r"\bU\d+", original, re.I):
@@ -159,7 +172,8 @@ def answer(q: Question, path: Path) -> Answer:
     if "window" in text:
         kind = "windows"
     elif "door" in text or (book.rows.get("door_types") and re.search(r"\bU\d+\b", q.question, re.I)):
-        kind = "door_types" if book.rows.get("door_types") else "doors"
+        individual = re.search(r"\bdoor\s+\d+\.[a-z]|door numbers|door schedule\s*-\s*number", text)
+        kind = "doors" if individual else "door_types" if book.rows.get("door_types") else "doors"
     elif re.search(r"room|finish|area|locker", text):
         kind = "rooms"
     else:

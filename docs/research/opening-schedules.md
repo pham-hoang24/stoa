@@ -21,7 +21,7 @@ and scans return typed `declined` abstentions instead of generic LLM guesses.
 
 This is a bounded parser for native schedule tables, not general construction
 drawing interpretation. Unknown attributes, missing/duplicate identifiers,
-ambiguous merged rows, invalid quantities, conflicting legends and requested
+ambiguous merged rows, unavailable filter columns, invalid quantities, conflicting legends and requested
 metric conversions abstain. Region geometry never establishes a fixture count:
 the three A-701 restroom-plan questions are deliberately outside this lane.
 
