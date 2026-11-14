@@ -30,13 +30,24 @@ PYTHONPATH=backend/src .venv/bin/python -m pytest backend/tests -q
 
 The CLI serves repository `frontend/` at `/` by default; `--frontend` overrides that directory; it does not modify the pitch site. Scripts must be external files because the frontend content policy does not permit inline JavaScript. Original SVG is served with a restrictive sandbox policy; callers should render evidence safely rather than inserting SVG source into HTML.
 
-Provider selection is server-side: `--llm-provider modal` overrides `STOA_LLM_PROVIDER`
-for this process. Modal uses the configured endpoint preset and
-`Qwen/Qwen3.8-Max-VL-Thinking`, authenticated only with `MODAL_API_KEY`. Override its
-endpoint/model using `STOA_MODAL_BASE_URL` and `STOA_MODAL_MODEL`. Featherless remains
-the default and retains the existing `STOA_LLM_*` configuration. Provider and
-endpoint identities separate cached responses; live request caps and no-retry
-transport behavior remain shared. See the root README for runnable configuration.
+Provider selection is server-side. NVIDIA is the default, using `NVIDIA_API_KEY`
+and `nvidia/nemotron-3.5-super-vl-120b-a12b` at `https://integrate.api.nvidia.com/v1`.
+`--llm-provider` overrides `STOA_LLM_PROVIDER`. NVIDIA timeouts (SDK timeout or HTTP
+408/504) may use one selected secondary: `--llm-fallback modal|featherless|none`
+overrides `STOA_LLM_FALLBACK` (default Modal). Other API errors do not fall through;
+a secondary timeout ends the chain. SDK retries remain disabled. Each model call permits
+at most two live attempts, which
+share the process request cap; cached replies remain free and endpoint-specific.
+
+`--llm-timeout-seconds` overrides positive finite `STOA_LLM_TIMEOUT_SECONDS`
+(default 60 per attempt). NVIDIA uses `STOA_NVIDIA_BASE_URL`/`STOA_NVIDIA_MODEL`
+overrides, Modal uses `MODAL_API_KEY` with `STOA_MODAL_BASE_URL`/`STOA_MODAL_MODEL`,
+and Featherless retains its existing `STOA_LLM_*` overrides. Explicit Modal or
+Featherless primary selection does not start the NVIDIA fallback chain.
+`model_provenance` reports the producing provider/model, cache status, and
+`fallback_from`/`fallback_reason` when used. Multi-file totals retain per-drawing
+provenance and identify mixed providers explicitly. No credential is included.
+See the root README for runnable configuration.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
 

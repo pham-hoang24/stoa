@@ -132,9 +132,19 @@ class HybridAnswerer:
                       'review_status':'unreviewed' if any(a.get('review_status')=='unreviewed' for a in answers) else 'native',
                       'evidence':[e for a in answers for e in a['evidence']],
                       'calculation':{'operation':'sum_contributions','calculations':[a.get('calculation') for a in answers]}}
+            producers = [{'drawing_id':d['id'], **a['model_provenance']}
+                         for d,a in zip(drawings,answers) if a.get('model_provenance')]
+            if producers:
+                identities = {(p['provider'],p['model']) for p in producers}
+                provider,model = next(iter(identities)) if len(identities)==1 else ('mixed',None)
+                answer['model_provenance'] = {'transport':'stoa.lanes.llm.chat',
+                                              'provider':provider,'model':model,
+                                              'review_status':'unreviewed','per_drawing':producers}
         answer['independent_scope'] = confirmed
         answer['contributions'] = [{'drawing_id':d['id'],'value':a['value'],'unit':a.get('unit'),
-                                    'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status')} for d,a in zip(drawings,answers)]
+                                    'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status'),
+                                    **({'model_provenance':a['model_provenance']} if a.get('model_provenance') else {})}
+                                   for d,a in zip(drawings,answers)]
         sources = {d['id']:d for d in drawings}
         for ev in answer['evidence']:
             source = sources[ev['drawing_id']]

@@ -29,27 +29,39 @@ The browser reads the active limits from the server. Restart the server and refr
 the page after changing the limit.
 
 Native IFC quantities/inventories, DXF geometry with declared units and supported
-PDF/SVG facts can work without a provider. Visual extraction and general question
-interpretation use the server's configured OpenAI-compatible transport: set
-`STOA_LLM_API_KEY` (or `FEATHERLESS_API_KEY`), `STOA_LLM_BASE_URL` and
-`STOA_LLM_MODEL` in the environment or local `.env`. `STOA_LLM_MAX_REQUESTS`
-bounds live calls; responses cache in `.cache/llm/`. Keys never reach the browser.
-Missing keys, caps and outages produce explicit abstentions.
+PDF/SVG facts can work without a provider. Visual extraction defaults to NVIDIA:
+`https://integrate.api.nvidia.com/v1`, model
+`nvidia/nemotron-3.5-super-vl-120b-a12b`, authenticated with `NVIDIA_API_KEY`.
+Keep credentials in the server environment or local `.env`; keys never reach the browser.
 
-To use Modal, keep `MODAL_API_KEY` in the server environment or local `.env` and run:
+By default, a NVIDIA timeout falls through once to Modal. Choose the secondary provider:
 
 ```sh
-uv run stoa-chat --llm-provider modal
+uv run stoa-chat --llm-provider nvidia --llm-fallback modal
+# Or: --llm-fallback featherless
 ```
 
-Alternatively set `STOA_LLM_PROVIDER=modal` in `.env`. The Modal preset uses
-`https://uknowme1928--ep-stoa-server.us-west.modal.direct/v1` and
-`Qwen/Qwen3.8-Max-VL-Thinking`. Optional `STOA_MODAL_BASE_URL` and `STOA_MODAL_MODEL`
-override that preset; a root endpoint URL is normalized to `/v1`. Modal uses
-`MODAL_API_KEY` exclusively, so existing Featherless credentials and generic
-`STOA_LLM_MODEL`/`STOA_LLM_BASE_URL` settings do not leak into this selection.
-Featherless remains the default (`--llm-provider featherless`) with the existing
-`STOA_LLM_*` overrides. Restart the server when changing CLI or `.env` settings.
+The timeout defaults to **60 seconds per provider attempt**; override it with
+`--llm-timeout-seconds 30`. Equivalent environment options are
+`STOA_LLM_PROVIDER=nvidia`, `STOA_LLM_FALLBACK=modal`, and
+`STOA_LLM_TIMEOUT_SECONDS=60`. Use fallback `none` to disable automatic fallthrough.
+Only SDK timeouts or HTTP 408/504 activate fallback. Authentication errors,
+rate limits, connection failures, HTTP 503 and other errors remain explicit.
+A secondary timeout stops the chain; there are at most two live attempts per model call.
+Each attempt counts against `STOA_LLM_MAX_REQUESTS` (default 200 per process).
+Cached replies remain free, separated by provider/endpoint/model; fallback results
+are never cached as NVIDIA answers. Answer provenance identifies the actual
+provider/model and records timeout fallthrough.
+
+- NVIDIA uses `NVIDIA_API_KEY`; optional `STOA_NVIDIA_BASE_URL` and `STOA_NVIDIA_MODEL` override its preset.
+- Modal uses `MODAL_API_KEY`, `https://uknowme1928--ep-stoa-server.us-west.modal.direct/v1`, and `Qwen/Qwen3.8-Max-VL-Thinking`. Override with `STOA_MODAL_BASE_URL` and `STOA_MODAL_MODEL`.
+- Featherless uses `STOA_LLM_API_KEY` (or `FEATHERLESS_API_KEY`), with existing `STOA_LLM_BASE_URL` and `STOA_LLM_MODEL` overrides.
+
+NVIDIA and Modal root endpoint URLs are normalized to `/v1`. Credentials and model
+settings remain provider-specific, including on fallback. Missing keys never cause
+silent credential reuse or fallthrough. Explicit `--llm-provider modal` or
+`--llm-provider featherless` runs that provider directly without NVIDIA fallback.
+Restart the server when changing CLI or `.env` settings.
 
 Answers distinguish **native source support**, **unreviewed model proposals**,
 **estimates**, **clarification**, **abstention** and **analysis errors**. Model
