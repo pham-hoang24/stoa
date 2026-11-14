@@ -51,6 +51,14 @@ def merge_counts(answers):
     return facts,evidence,duplicates,basis
 
 
+def merged_ocr(answers):
+    """Per-view OCR outcomes from every batch; each detail view is read in exactly one batch."""
+    views={}
+    for a in answers:
+        for v in a.get('ocr',{}).get('views',[]):views.setdefault(v['view_id'],v)
+    return {'ocr':{'engine':'tesseract','review_status':'unreviewed','views':list(views.values())}} if views else {}
+
+
 def extract_details(context,catalogs,kind,extractor):
     try:
         views=raster_views(context['drawings'][0])
@@ -76,18 +84,18 @@ def extract_details(context,catalogs,kind,extractor):
         answers.append(answer)
         if answer['status'] in {'abstain','clarification'}:
             answer={**answer,'explanation':'Could not complete all required image regions. '+answer['explanation'],
-                    'image_processing':processing,'model_provenance':provenance(answers)}
+                    'image_processing':processing,'model_provenance':provenance(answers),**merged_ocr(answers)}
             return answer
         processing['completed_views'].extend(v['id'] for _,v in batch)
     try:
         facts,evidence,duplicates,basis=merge_counts(answers)
     except ValueError as exc:
         return {**abstain(str(exc),'image_reconciliation_failed'),'image_processing':processing,
-                'model_provenance':provenance(answers)}
+                'model_provenance':provenance(answers),**merged_ocr(answers)}
     processing['duplicates_removed']=duplicates
     explanation=f'Calculated from cited detections after processing all {len(details)} required image regions. The overview supplied context; visual interpretation remains unreviewed.'
     if basis=='text_markers':explanation+=' The label count assumes one marker per object; verify that assumption.'
     return {**answers[0],'status':'estimate' if any(a['status']=='estimate' for a in answers) else 'proposal',
             'value':len(facts),'evidence':evidence,'explanation':explanation,
             'calculation':{'operation':'count','facts':facts,'count_basis':basis,'duplicates_removed':duplicates},
-            'image_processing':processing,'model_provenance':provenance(answers)}
+            'image_processing':processing,'model_provenance':provenance(answers),**merged_ocr(answers)}
