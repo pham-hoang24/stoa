@@ -9,48 +9,34 @@
   </head>
   <body>
     <a href="#question" class="skip">Skip to question</a>
-    <div class="workspace">
-      <aside class="sidebar">
+    <div class="app">
+      <header class="header">
         <a class="brand" href="/" aria-label="Stoa drawing desk"
-          ><span class="brandmark">S</span> stoa<span class="local">Local</span></a
-        ><button id="new-chat" class="primary">
+          ><span class="brandmark">S</span> stoa</a
+        >
+        <details id="chat-menu" class="chat-menu">
+          <summary id="chat-menu-label" aria-label="Switch conversation">
+            Conversations
+          </summary>
+          <div class="chat-panel">
+            <nav id="chats" aria-label="Conversations"></nav>
+            <p class="hint">
+              Conversations and originals stay on this computer. Selected
+              content may be sent to your configured model.
+            </p>
+          </div>
+        </details>
+        <button id="new-chat" class="primary">
           <span aria-hidden="true">+</span> New conversation
         </button>
-        <h2 class="side-heading">Conversations</h2>
-        <nav id="chats" aria-label="Conversations"></nav>
-        <div class="sidebar-note">
-          <span class="dot"></span> Saved on this computer
-          <p>
-            Conversations and originals stay on this computer. Selected content
-            may be sent to your configured model.
-          </p>
-        </div>
-      </aside>
-      <main>
-        <header class="topbar">
-          <h1 id="chat-title">Drawing desk</h1>
-          <button id="delete-chat" class="quiet" hidden>Delete chat</button>
-        </header>
-        <section
-          class="drawings"
-          id="sources"
-          aria-labelledby="drawings-heading"
-          hidden
-        >
-          <div class="section-line">
-            <button
-              type="button"
-              id="sources-toggle"
-              class="sources-toggle"
-              aria-expanded="true"
-              aria-controls="sources-body"
-            >
-              <span class="sources-chevron" aria-hidden="true">▾</span>
-              <h2 id="drawings-heading">
-                Sources <span id="drawing-count">(0)</span>
-              </h2>
-              <span id="sources-summary" class="sources-summary"></span>
-            </button>
+        <span class="grow"></span>
+        <span class="local">Saved on this computer</span>
+        <button id="delete-chat" class="quiet" hidden>Delete chat</button>
+      </header>
+      <div class="content">
+        <section class="plan" aria-label="Source drawing">
+          <div class="plan-bar" id="sources" hidden>
+            <div id="drawing-list" role="group" aria-label="Sources"></div>
             <label class="upload-button"
               ><span aria-hidden="true">+</span> Add drawings<input
                 id="upload"
@@ -60,54 +46,50 @@
                 disabled
             /></label>
           </div>
-          <div id="sources-body">
-            <div id="drawing-list"></div>
-            <p id="upload-hint" class="hint">
-              PNG · JPEG · PDF · IFC · DXF · SVG.
-            </p>
-          </div>
-        </section>
-        <div id="notice" role="status" aria-live="polite"></div>
-        <section
-          id="messages"
-          aria-label="Conversation"
-          aria-live="polite"
-        ></section>
-        <form id="ask">
-          <div id="scope" class="hint">Add a drawing to start asking</div>
-          <label for="question" class="sr-only"
-            >Question about selected drawings</label
+          <p id="upload-hint" class="hint plan-hint" hidden></p>
+          <div id="plan-stage" class="plan-stage"></div>
+          <aside
+            id="evidence-panel"
+            class="evidence-panel"
+            aria-label="Evidence details"
           >
-          <div class="composer">
-            <textarea
-              id="question"
-              rows="2"
-              placeholder="Ask about rooms, quantities, dimensions…"
-              maxlength="10000"
-              required
-            ></textarea
-            ><button id="send" class="primary" type="submit" disabled>
-              Ask question
-            </button>
+            <div class="section-line">
+              <h2 class="panel-heading">Evidence</h2>
+              <button id="close-evidence" class="quiet" hidden>Close</button>
+            </div>
+            <div id="evidence"></div>
+          </aside>
+        </section>
+        <aside class="chat" aria-label="Conversation">
+          <div class="chat-head">
+            <h1 id="chat-title">Drawing desk</h1>
           </div>
-          <div class="composer-footer">
-            <span
-              >Enter to send · Shift + Enter for a new line · / to jump here</span
-            ><span>Every quantity needs evidence.</span>
-          </div>
-        </form>
-      </main>
-      <aside
-        id="evidence-panel"
-        class="evidence-panel"
-        aria-label="Evidence inspector"
-      >
-        <div class="section-line">
-          <h2 class="panel-heading">Evidence</h2>
-          <button id="close-evidence" class="quiet" hidden>Close</button>
-        </div>
-        <div id="evidence"></div>
-      </aside>
+          <div id="notice" role="status" aria-live="polite"></div>
+          <section id="messages" aria-live="polite"></section>
+          <form id="ask">
+            <div id="scope" class="hint">Add a drawing to start asking</div>
+            <label for="question" class="sr-only"
+              >Question about selected drawings</label
+            >
+            <div class="composer">
+              <textarea
+                id="question"
+                rows="2"
+                placeholder="Ask about rooms, quantities, dimensions…"
+                maxlength="10000"
+                required
+              ></textarea
+              ><button id="send" class="primary" type="submit" disabled>
+                Ask question
+              </button>
+            </div>
+            <div class="composer-footer">
+              <span>Enter to send · Shift + Enter for a new line</span
+              ><span>Every quantity needs evidence.</span>
+            </div>
+          </form>
+        </aside>
+      </div>
     </div>
     <dialog id="delete-dialog">
       <h2>Delete this conversation?</h2>
