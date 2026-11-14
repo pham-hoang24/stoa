@@ -71,5 +71,5 @@ Fill this in at kickoff, as soon as the project is split up.
 |---|---|---|
 | Eval harness, router, viewer, team lead | `@pham-hoang24` | `src/stoa/eval/`, `src/stoa/router.py`, `viewer/` |
 | IFC lane | `@z0rhan` | `src/stoa/lanes/ifc.py` |
-| Swiss DXF/PDF lane | unassigned | `src/stoa/lanes/swiss.py` |
+| Swiss DXF/PDF lane | `@pham-hoang24` | `src/stoa/lanes/swiss.py` |
 | CubiCasa PNG vision lane | unassigned | `src/stoa/lanes/vision.py` |
