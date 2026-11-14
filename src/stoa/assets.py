@@ -43,7 +43,10 @@ def from_bytes(payload: bytes) -> Drawing:
     width, height = struct.unpack(">II", payload[16:24])
     if width < 1 or height < 1 or width * height > MAX_PIXELS:
         raise DrawingError("PNG dimensions are invalid or exceed the 40 megapixel limit")
-    image = cv2.imdecode(np.frombuffer(payload, np.uint8), cv2.IMREAD_UNCHANGED)
+    try:
+        image = cv2.imdecode(np.frombuffer(payload, np.uint8), cv2.IMREAD_UNCHANGED)
+    except cv2.error:
+        raise DrawingError("PNG could not be decoded") from None
     if image is None or image.shape[:2] != (height, width):
         raise DrawingError("PNG could not be decoded")
     if image.dtype == np.uint16:
@@ -62,6 +65,8 @@ def from_bytes(payload: bytes) -> Drawing:
     ok, normalized = cv2.imencode(".png", image)
     if not ok:
         raise DrawingError("PNG normalization failed")
+    if normalized.nbytes > MAX_BYTES:
+        raise DrawingError("Normalized PNG exceeds the 25 MiB limit; provide a smaller drawing")
     # Normalize encoding and strip source metadata; inference sees only pixels.
     return Drawing(digest, width, height, normalized.tobytes())
 

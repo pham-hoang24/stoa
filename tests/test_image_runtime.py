@@ -133,7 +133,7 @@ def test_tiling_covers_edges_and_budget_is_checked_before_calls():
 
 
 @pytest.mark.parametrize("text", [
-    "I see four windows", "{bad JSON}", '{"detections":[]}',
+    "I see four windows", "{bad JSON}", "```{} ```", '{"detections":[]}',
     reply([[0, 0, 1001, 1000]]), reply([[500, 500, 100, 100]]),
     reply([[True, 0, 500, 500]]),
     '{"readable":true,"complete":true,"detections":[{"box":[1,2,3,4]}]}',

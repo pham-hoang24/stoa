@@ -70,6 +70,8 @@ def provider(view: View, task: CountTask) -> str:
 def parse(reply: str, view: View) -> tuple[list[Detection], bool, bool]:
     text = reply.strip()
     if text.startswith("```") and text.endswith("```"):
+        if "\n" not in text:
+            raise ValueError("Detector output has an invalid code fence")
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     try:
         data = json.loads(text)
