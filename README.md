@@ -13,8 +13,10 @@ Create a conversation, upload several PNG, JPEG, PDF, IFC, DXF or SVG drawings,
 select the relevant drawings, and ask a question. Follow-ups retain selected scope
 and target context. Use source buttons to open a safe PNG page preview with
 source-coordinate boxes, polygons or calibration lines, inspect native entity
-IDs/properties and calculations, or open the original. Native entities without
-spatial previews still expose their source properties. Delete removes a conversation
+IDs/properties and calculations, or open the original. IFC and DXF uploads get a
+plan view drawn from their own geometry (DXF modelspace; one page per IFC storey),
+with cited entities boxed at their geometric extent. Native entities without
+drawable geometry keep a plain ID citation with their source properties. Delete removes a conversation
 and uploads unreferenced by other conversations.
 
 Chats and originals persist in `.cache/chat/` (SQLite plus content-addressed assets).

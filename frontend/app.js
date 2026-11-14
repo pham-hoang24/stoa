@@ -11,6 +11,9 @@ let current = null,
   focusPending = false,
   asking = false,
   pendingQ = null;
+// IFC/DXF plan views are drawn by the server from entity geometry on first
+// request; drawing id → {status: pending|ready|unavailable, pages, reason}.
+const plans = new Map();
 const formatLimit = (bytes) =>
   bytes >= 1024 * 1024 ? `${bytes / (1024 * 1024)} MiB` : `${bytes} bytes`;
 const element = (tag, cls, text) => {
@@ -42,8 +45,45 @@ function chatName(chat) {
 const previewUrl = (drawing, page) =>
   drawing.asset_url.replace("/assets/", "/previews/") + "/" + page;
 const viewedDrawing = () => current?.drawings[view.di];
+const isNative = (drawing) =>
+  drawing?.format === "ifc" || drawing?.format === "dxf";
+const pagesOf = (drawing) =>
+  drawing?.pages.length
+    ? drawing.pages
+    : (isNative(drawing) && plans.get(drawing.id)?.pages) || [];
 const pageMeta = (drawing, page) =>
-  drawing?.pages.find((p) => p.page === page) || {};
+  pagesOf(drawing).find((p) => p.page === page) || {};
+const pageName = (p) => (p.label ? `${p.page} · ${p.label}` : "Page " + p.page);
+async function loadPlan(drawing) {
+  if (!isNative(drawing) || plans.has(drawing.id)) return;
+  plans.set(drawing.id, { status: "pending" });
+  const url = drawing.asset_url.replace("/assets/", "/previews/");
+  let plan;
+  try {
+    for (;;) {
+      const response = await fetch(url, { cache: "no-store" });
+      plan = await response.json();
+      if (!response.ok) throw Error(plan.error || "Plan view unavailable");
+      if (plan.status !== "pending") break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } catch (error) {
+    plan = { status: "unavailable", reason: error.message };
+  }
+  plans.set(drawing.id, plan);
+  // Citations name the storey once the plan pages are known.
+  if (
+    plan.status === "ready" &&
+    current?.messages.some((m) =>
+      m.answer?.evidence?.some((e) => e.drawing_id === drawing.id && e.page),
+    )
+  )
+    renderMessages();
+  if (viewedDrawing()?.id === drawing.id) {
+    if (!pageMeta(drawing, view.page).page) view.page = 1;
+    renderPlan();
+  }
+}
 function controls() {
   const locked = busy || asking;
   document.body.classList.toggle("busy", busy);
@@ -308,21 +348,32 @@ function renderPlan() {
   const page = view.page,
     meta = pageMeta(drawing, page),
     preview = element("div", "preview"),
-    img = element("img");
-  img.alt = `Source preview for ${drawing.filename}, page ${page}`;
-  img.src = previewUrl(drawing, page);
-  img.onerror = () => {
-    preview.replaceChildren(
-      element(
-        "p",
-        "no-preview",
-        "No spatial preview for this source. Open an answer's evidence to inspect its identifiers and properties.",
-      ),
+    img = element("img"),
+    plan = isNative(drawing) && plans.get(drawing.id),
+    noPreview = (text) => {
+      preview.replaceChildren(element("p", "no-preview", text));
+      preview.classList.add("failed");
+    };
+  img.alt = `Source preview for ${drawing.filename}, ${meta.label ? "storey " + meta.label : "page " + page}`;
+  img.onerror = () =>
+    noPreview(
+      "No spatial preview for this source. Open an answer's evidence to inspect its identifiers and properties.",
     );
-    preview.classList.add("failed");
-  };
-  preview.append(img);
-  overlay(preview, drawing, page);
+  if (isNative(drawing) && plan?.status !== "ready") {
+    if (!plan) loadPlan(drawing);
+    if (plan?.status === "unavailable")
+      noPreview(
+        `No plan view for this source: ${plan.reason || "unavailable"}. Open an answer's evidence to inspect its identifiers and properties.`,
+      );
+    else {
+      noPreview("Drawing a plan view from the model geometry…");
+      preview.firstChild.setAttribute("role", "status");
+    }
+  } else {
+    img.src = previewUrl(drawing, page);
+    preview.append(img);
+    overlay(preview, drawing, page);
+  }
   const viewport = element("div", "preview-viewport");
   viewport.tabIndex = 0;
   viewport.setAttribute("role", "region");
@@ -343,11 +394,14 @@ function renderPlan() {
   const name = element("span", "plan-name", drawing.filename);
   name.title = drawing.filename;
   toolbar.append(name, element("span", "grow"));
-  if (drawing.pages.length > 1) {
+  if (pagesOf(drawing).length > 1) {
     const select = element("select", "page-select");
-    select.setAttribute("aria-label", "Page");
-    drawing.pages.forEach((p) => {
-      const o = element("option", "", "Page " + p.page);
+    select.setAttribute(
+      "aria-label",
+      plan?.layout === "storeys" ? "Storey" : "Page",
+    );
+    pagesOf(drawing).forEach((p) => {
+      const o = element("option", "", pageName(p));
       o.value = p.page;
       select.append(o);
     });
@@ -369,7 +423,10 @@ function renderPlan() {
   };
   const e = ev?.data,
     hasBox =
-      hasGeom(e) && e.drawing_id === drawing.id && (e.page || 1) === page;
+      hasGeom(e) &&
+      e.drawing_id === drawing.id &&
+      (e.page || 1) === page &&
+      (!isNative(drawing) || plan?.status === "ready");
   fit.onclick = () => {
     setZoom(1);
     viewport.scrollTo(0, 0);
@@ -382,9 +439,14 @@ function renderPlan() {
       width = e.source_width || meta.width,
       height = e.source_height || meta.height,
       origin = e.transform?.slice(4, 6) || meta.origin || [0, 0];
+    // Plan views of whole storeys need surrounding rooms for context, so a
+    // thin door or line is not blown up to fill the pane.
     setZoom(
-      Math.min(width / Math.max(1, x1 - x0), height / Math.max(1, y1 - y0)) *
-        0.7,
+      Math.min(
+        isNative(drawing) ? 4 : 16,
+        Math.min(width / Math.max(1, x1 - x0), height / Math.max(1, y1 - y0)) *
+          0.7,
+      ),
     );
     requestAnimationFrame(() => {
       viewport.scrollLeft =
@@ -619,7 +681,12 @@ function renderMessages() {
           .replace(/\s+/g, " ")
           .trim();
         const label = quote ? "" : String(e.label || "").trim();
-        const base = `${String(i + 1).padStart(2, "0")} · ${drawing?.filename || "Source"}${e.page ? " · p." + e.page : ""}${label ? " · " + truncate(label, 28) : ""}`;
+        const where = e.page
+          ? pageMeta(drawing, e.page).label
+            ? " · " + truncate(pageMeta(drawing, e.page).label, 18)
+            : " · p." + e.page
+          : "";
+        const base = `${String(i + 1).padStart(2, "0")} · ${drawing?.filename || "Source"}${where}${label ? " · " + truncate(label, 28) : ""}`;
         const b = element(
           "button",
           "citation",
@@ -683,9 +750,16 @@ function renderEvidence() {
       element(
         "p",
         "hint",
-        "Native entity evidence. A spatial preview is not available; inspect the source identifiers and properties below.",
+        isNative(drawing) && plans.get(drawing.id)?.status === "ready"
+          ? "This entity has no drawable geometry in the plan view, so it is cited by its identifier only. Inspect the source properties below."
+          : "Native entity evidence. A spatial preview is not available; inspect the source identifiers and properties below.",
       ),
     );
+  else if (isNative(drawing) && evidence.page) {
+    const p = pageMeta(drawing, evidence.page);
+    if (p.label)
+      panel.append(element("p", "evidence-meta", "Plan view: " + p.label));
+  }
   const links = element("div", "source-links");
   for (const [text, url] of [
     ["Open original", evidence.original_url || drawing?.asset_url],
@@ -743,7 +817,9 @@ async function selectEvidence(
         : await api(`/api/chats/${current.id}/evidence/${message.id}/${index}`),
     di = current.drawings.findIndex((d) => d.id === data.drawing_id);
   ev = { message, index, data };
-  if (di >= 0) view = { di, page: data.page || 1 };
+  // Entity evidence without a plan location keeps the page being viewed.
+  if (di >= 0)
+    view = { di, page: data.page || (di === view.di ? view.page : 1) };
   else view.page = data.page || 1;
   evOpen = user;
   focusPending = (user || focus) && hasGeom(data);
@@ -788,6 +864,7 @@ async function openChat(id) {
   ev = null;
   evOpen = false;
   focusPending = false;
+  current.drawings.forEach(loadPlan);
   renderAll();
   await loadChats();
   await showLatestEvidence();

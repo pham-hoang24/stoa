@@ -30,6 +30,7 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.assets = self.root / 'assets'
         self.assets.mkdir(exist_ok=True)
+        self.native_previews = self.root / 'native_previews'
         self.lock = threading.RLock()
         self.db = sqlite3.connect(self.root / 'chats.sqlite3', check_same_thread=False)
         self.db.execute('CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
@@ -42,6 +43,11 @@ class Store:
         for asset in self.assets.iterdir():
             if asset.is_file() and asset.name not in referenced:
                 asset.unlink(missing_ok=True)
+        if self.native_previews.is_dir():
+            import shutil
+            for cached in self.native_previews.iterdir():
+                if cached.name.split('-v')[0] not in referenced:
+                    shutil.rmtree(cached, ignore_errors=True)
 
     def get(self, chat_id):
         row = self.db.execute('SELECT data FROM chats WHERE id=?', (chat_id,)).fetchone()
@@ -127,6 +133,8 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
             parts = unquote(urlsplit(self.path).path).strip('/').split('/')
             if len(parts) == 4 and parts[:2] == ['api', 'chats'] and parts[3] == 'questions' and self.command == 'POST':
                 return self.ask(parts[2])
+            if len(parts) in {5, 6} and parts[:2] == ['api', 'chats'] and parts[3] == 'previews' and self.command == 'GET':
+                return self.preview(parts)
             with store.lock:
                 return self.locked_route()
 
@@ -157,6 +165,8 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 answer = validate_answer(answer, context['drawings'])
             except ValueError:
                 answer = abstain('Analysis returned invalid or unresolvable evidence', 'invalid_analysis')
+            from .native_preview import attach
+            answer = attach(answer, context['drawings'], store.native_previews)
             message = {'id': uuid.uuid4().hex, 'role': 'assistant', 'drawing_ids': selection, 'answer': answer}
             for index, evidence in enumerate(answer.get('evidence', [])):
                 evidence['url'] = '/api/chats/' + chat_id + '/evidence/' + message['id'] + '/' + str(index)
@@ -169,6 +179,36 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 chat['messages'].insert(ids.index(user_message['id']) + 1, message)
                 store.save(chat)
             return self.respond(200, message)
+
+        def preview(self, parts):
+            # Lazy IFC/DXF plan geometry runs without the store lock (it can take
+            # seconds); assets are immutable and content-addressed.
+            with store.lock:
+                chat = store.get(parts[2])
+                drawing = next((d for d in chat['drawings'] if d['id'] == parts[4]), None)
+                if drawing is None:
+                    raise ApiError(404, 'Drawing not in this chat')
+                drawing = {**drawing, 'path': store.assets / drawing['sha256']}
+            from . import native_preview
+            if len(parts) == 5:
+                # Plan index for native sources: pages, entity boxes, or why not.
+                result = native_preview.plan(drawing, store.native_previews)
+                return self.respond(202 if result['status'] == 'pending' else 200, result)
+            try:
+                if drawing['format'] in {'ifc', 'dxf'}:
+                    body = native_preview.page_png(drawing, int(parts[5]), store.native_previews)
+                else:
+                    from .render import preview
+                    with store.lock:  # raster previews keep their original locking
+                        body, _ = preview(drawing, int(parts[5]))
+            except (ValueError, RuntimeError):
+                raise ApiError(404, 'Preview unavailable')
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(body)
 
         def locked_route(self):
             path = unquote(urlsplit(self.path).path)
@@ -241,22 +281,6 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                     self.send_header('Content-Length', str(len(body)))
                     self.send_header('X-Content-Type-Options', 'nosniff')
                     self.send_header('Content-Security-Policy', "default-src 'none'; sandbox")
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                if parts[3] == 'previews' and len(parts) == 6 and self.command == 'GET':
-                    drawing = next((d for d in chat['drawings'] if d['id'] == parts[4]), None)
-                    if drawing is None:
-                        raise ApiError(404, 'Drawing not in this chat')
-                    from .render import preview
-                    try:
-                        body, _ = preview({**drawing, 'path': store.assets / drawing['sha256']}, int(parts[5]))
-                    except (ValueError, RuntimeError):
-                        raise ApiError(404, 'Preview unavailable')
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'image/png')
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('X-Content-Type-Options', 'nosniff')
                     self.end_headers()
                     self.wfile.write(body)
                     return
