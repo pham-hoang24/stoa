@@ -89,7 +89,7 @@ class HybridAnswerer:
         prior = previous['answer'].get('target') if previous and previous.get('drawing_ids')==selection else None
         if re.search(r'\b(its|their|them|those|niiden|niitä)\b',question.casefold()) and not prior:
             return clarify('Which objects do you mean? State the target for this selected drawing scope.')
-        negated = bool(re.search(r'\b(not|no|never|ei|eivät|don.t)\b',question.casefold()))
+        negated = bool(re.search(r'\b(not|no|never|ei|eivät|don.t|aren.t|isn.t|weren.t|wasn.t|cannot|can.t)\b',question.casefold()))
         independent = not negated and bool(re.search(r'\b(are (?:all )?independent|are non.overlapping|confirm independent|erillisiä)\b',question.casefold()))
         confirmed = independent or bool(previous and previous.get('drawing_ids')==selection and previous['answer'].get('independent_scope'))
         if len(drawings)>1:

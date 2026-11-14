@@ -40,6 +40,7 @@ def test_same_sentence_independence_preserves_question_and_negation(tmp_path, mo
         assert answer['value'] == 0
         assert seen == ['how many rectangles?', 'how many rectangles?']
         seen.clear()
+        assert multi("These aren't independent, how many rectangles?")['status'] == 'clarification'
         assert multi('These are not independent, how many rectangles?')['status'] == 'clarification'
         assert not seen
 
