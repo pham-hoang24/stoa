@@ -12,6 +12,10 @@ from urllib.parse import urlsplit, parse_qs, unquote
 from .ingest import inspect_upload
 from .answers import abstain, validate_answer
 
+MIB = 1024 * 1024
+DEFAULT_UPLOAD_BYTES = 50 * MIB
+DEFAULT_IFC_UPLOAD_BYTES = 512 * MIB
+
 
 class ApiError(Exception):
     def __init__(self, status, message):
@@ -48,8 +52,11 @@ class Store:
         self.db.commit()
 
 
-def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=50 * 1024 * 1024, allowed_origins=(), static_dir=None):
+def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES):
     """Create a local server; the caller owns serve_forever/shutdown/server_close."""
+    upload_limits = {'default': max_upload_bytes, 'ifc': max_ifc_upload_bytes}
+    if any(type(limit) is not int or limit <= 0 for limit in upload_limits.values()):
+        raise ValueError('Upload limits must be positive byte counts')
     store = Store(root)
     if answerer is None:
         from .analysis import HybridAnswerer
@@ -126,6 +133,8 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 self.wfile.write(body)
                 return
             parts = path.strip('/').split('/')
+            if parts == ['api', 'config'] and self.command == 'GET':
+                return self.respond(200, {'upload_limits': upload_limits})
             if parts == ['api', 'chats']:
                 if self.command == 'POST':
                     data = self.read_json()
@@ -151,7 +160,8 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 base = '/api/chats/' + chat['id']
                 if parts[3] == 'uploads' and len(parts) == 4 and self.command == 'POST':
                     filename = parse_qs(urlsplit(self.path).query).get('filename', [''])[0]
-                    content = self.read_body(max_upload_bytes)
+                    limit = upload_limits['ifc' if Path(filename).suffix.lower() == '.ifc' else 'default']
+                    content = self.read_body(limit)
                     try:
                         metadata = inspect_upload(filename, content)
                     except ValueError as exc:

@@ -23,6 +23,11 @@ location, and `--frontend /path/to/frontend` to override the static app director
 Run one process per storage directory. This local prototype has no accounts or
 remote deployment configuration; it binds to `127.0.0.1`.
 
+IFC uploads accept up to 512 MiB by default; other formats retain a 50 MiB limit.
+For larger models, use `uv run stoa-chat --max-ifc-upload-mib 1024` (1 GiB).
+The browser reads the active limits from the server. Restart the server and refresh
+the page after changing the limit.
+
 Native IFC quantities/inventories, DXF geometry with declared units and supported
 PDF/SVG facts can work without a provider. Visual extraction and general question
 interpretation use the server's configured OpenAI-compatible transport: set

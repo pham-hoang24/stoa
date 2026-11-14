@@ -3,7 +3,10 @@ const $ = (id) => document.getElementById(id);
 let current = null,
   selected = new Set(),
   busy = false,
-  evidenceTrigger = null;
+  evidenceTrigger = null,
+  uploadLimits = null;
+const formatLimit = (bytes) =>
+  bytes >= 1024 * 1024 ? `${bytes / (1024 * 1024)} MiB` : `${bytes} bytes`;
 const element = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -22,7 +25,7 @@ function notice(text = "") {
   $("notice").textContent = text;
 }
 function controls() {
-  $("upload").disabled = busy || !current;
+  $("upload").disabled = busy || !current || !uploadLimits;
   $("send").disabled = busy || !current || !selected.size;
   $("new-chat").disabled = busy;
   $("delete-chat").disabled = busy;
@@ -72,9 +75,12 @@ function renderDrawings() {
     $("drawing-list").append(label);
   }
   $("drawing-count").textContent = current?.drawings.length || 0;
+  const limits = uploadLimits
+    ? `IFC up to ${formatLimit(uploadLimits.ifc)}; other formats up to ${formatLimit(uploadLimits.default)}.`
+    : "Loading upload limits…";
   $("upload-hint").textContent = current
-    ? "Select the drawings relevant to your next question. Multiple views may overlap; confirm independence before totaling."
-    : "PNG · JPEG · PDF · IFC · DXF · SVG · up to 50 MiB each. Create a conversation to begin.";
+    ? `Select the drawings relevant to your next question. Multiple views may overlap; confirm independence before totaling. ${limits}`
+    : `PNG · JPEG · PDF · IFC · DXF · SVG. ${limits} Create a conversation to begin.`;
 }
 const labels = {
   supported: "Native · source supported",
@@ -444,7 +450,10 @@ $("upload").onchange = () =>
       const file = files[i];
       notice(`Uploading ${i + 1}/${files.length}: ${file.name}…`);
       try {
-        if (file.size > 50 * 1024 * 1024) throw Error("File exceeds 50 MiB");
+        const limit = /\.ifc$/i.test(file.name)
+          ? uploadLimits.ifc
+          : uploadLimits.default;
+        if (file.size > limit) throw Error(`File exceeds ${formatLimit(limit)}`);
         const d = await api(
           `/api/chats/${current.id}/uploads?filename=${encodeURIComponent(file.name)}`,
           {
@@ -520,4 +529,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeEvidence();
 });
 renderMessages();
-run(loadChats);
+run(async () => {
+  uploadLimits = (await api("/api/config", { cache: "no-store" })).upload_limits;
+  renderDrawings();
+  await loadChats();
+});

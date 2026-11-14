@@ -35,7 +35,7 @@ const wait = (expression) =>
 await send("Runtime.enable");
 await send("Page.enable");
 await send("Page.navigate", { url: "http://127.0.0.1:8093/" });
-await wait(`document.querySelector('#new-chat')`);
+await wait(`document.querySelector('#new-chat')&&!document.querySelector('#new-chat').disabled`);
 await evaluate(`document.querySelector('#new-chat').click()`);
 await wait(
   `document.querySelector('#upload')&&!document.querySelector('#upload').disabled`,
@@ -144,7 +144,23 @@ await evaluate(
   `document.querySelector('#delete-chat').click();document.querySelector('#confirm-delete').click()`,
 );
 await wait(`document.querySelectorAll('.message').length===0`);
+await evaluate(`document.querySelector('#new-chat').click()`);
+await wait(`!document.querySelector('#upload').disabled`);
+await evaluate(String.raw`(()=>{
+  const source = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('','',(),(),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\n"
+    + ' '.repeat(51 * 1024 * 1024)
+    + "\nDATA;\n#1=IFCPROJECT('0000000000000000000000',$,'Large model',$,$,$,$,$,$);\nENDSEC;\nEND-ISO-10303-21;\n";
+  const files = new DataTransfer();
+  files.items.add(new File([source], 'Large model.IFC', {type:'application/x-step'}));
+  document.querySelector('#upload').files = files.files;
+  document.querySelector('#upload').dispatchEvent(new Event('change'));
+})()`);
+await wait(`document.querySelector('.drawing')?.textContent.includes('Large model.IFC')&&!document.querySelector('#upload').disabled`);
+const largeIfc = await evaluate(`({uploaded:document.querySelector('.drawing').textContent,limits:document.querySelector('#upload-hint').textContent})`);
+if (!largeIfc.limits.includes('512 MiB')) throw Error(JSON.stringify(largeIfc));
+await evaluate(`document.querySelector('#delete-chat').click();document.querySelector('#confirm-delete').click()`);
+await wait(`document.querySelectorAll('.drawing').length===0`);
 console.log(
-  JSON.stringify({ highlighted, zoomed, resumed, mobileFits: fits, errors }),
+  JSON.stringify({ highlighted, zoomed, resumed, largeIfc, mobileFits: fits, errors }),
 );
 ws.close();
