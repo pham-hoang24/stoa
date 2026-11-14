@@ -8,6 +8,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .data import ROOT
 from .cli import ask
+from .assets import DEFAULT_DIRECTORY
+from .upload_api import UploadAPI
 
 PAGE = (Path(__file__).parent / "viewer.html").read_text() if (Path(__file__).parent / "viewer.html").exists() else "viewer.html missing"
 EXAMPLES = Path(__file__).resolve().parents[2] / "viewer" / "examples.json"
@@ -91,6 +93,8 @@ def present(ans: dict, question: str = "") -> dict:
 
 
 class H(BaseHTTPRequestHandler):
+    uploads = UploadAPI(DEFAULT_DIRECTORY)
+
     def _send(self, code, body: bytes, ctype="application/json"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -98,6 +102,8 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.uploads.handle(self):
+            return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         if u.path == "/":
@@ -121,6 +127,8 @@ class H(BaseHTTPRequestHandler):
         self._send(404, b"{}")
 
     def do_POST(self):
+        if self.uploads.handle(self):
+            return
         if urlparse(self.path).path != "/api/ask":
             return self._send(404, b"{}")
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -130,5 +138,6 @@ class H(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8765) -> None:
-    print(f"viewer on http://127.0.0.1:{port}")
+    print(f"Open your PNG: http://127.0.0.1:{port}/upload", flush=True)
+    print(f"Dataset examples: http://127.0.0.1:{port}/", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()

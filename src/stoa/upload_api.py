@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .assets import MAX_BYTES, AssetStore
+from .assets import DEFAULT_DIRECTORY, MAX_BYTES, AssetStore
 from .image_review import review
 from .image_runtime import assess, provider
 
@@ -110,7 +110,7 @@ class UploadAPI:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8091)
-    parser.add_argument("--assets", type=Path, default=Path(".cache/uploads"))
+    parser.add_argument("--assets", type=Path, default=DEFAULT_DIRECTORY)
     args = parser.parse_args(argv)
     api = UploadAPI(args.assets)
 

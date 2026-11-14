@@ -5,11 +5,11 @@ Answers quantity-takeoff questions about construction drawings and shows the evi
 ## Language
 
 **Question**:
-A natural-language request about one drawing, such as a count, an area, a length, a volume or free text. Each exists as an English and a native-language pair.
+A natural-language request about one drawing, such as a count, an area, a length, a volume or free text. Benchmark questions have an English and a native-language pair; application requests have no reference-answer fields.
 _Avoid_: query, prompt
 
 **Drawing**:
-One building plan in any format. Files with the same stem and a different extension are the same drawing.
+One building plan in any format. Dataset files with the same stem and a different extension are the same drawing. Uploaded PNGs are identified by normalized pixels, independently of filenames.
 _Avoid_: document, file (when the content matters)
 
 **Sibling**:
@@ -20,7 +20,7 @@ _Avoid_: twin, companion (except for an IFC model, see below)
 The IFC model a floor-plan PDF or SVG was rendered from.
 
 **Source**:
-The dataset folder a drawing comes from, such as `swiss_dwellings` or `cubicasa5k`. It decides the lane.
+The dataset folder a benchmark drawing comes from, such as `swiss_dwellings` or `cubicasa5k`. It decides the benchmark lane. Uploaded PNGs use their validated contents and explicit task instead of source-folder routing (ADR-0004).
 _Avoid_: dataset (means the whole corpus)
 
 **Lane**:
@@ -28,7 +28,7 @@ A path that answers questions for one kind of drawing: ifc, swiss, vision or doc
 _Avoid_: pipeline, handler, route
 
 **Router**:
-Picks the lane for a question by source and file format, never by question type.
+Picks the benchmark lane for a question by source and file format, never by question type. Application PNG entry points bypass benchmark routing.
 
 **Answer**:
 A value, its unit, its evidence and the lane that produced it.

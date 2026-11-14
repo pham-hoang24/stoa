@@ -3,7 +3,7 @@
 <style>
 body{font:16px system-ui;margin:0;background:#f4f6f6;color:#173137}header,aside{padding:20px}header{background:#fff;border-bottom:1px solid #bcc}h1{margin:0}main{display:grid;grid-template-columns:340px 1fr;gap:16px}.stage{position:relative;align-self:start;background:#fff;margin:20px 20px 20px 0}.stage img{display:block;width:100%}.stage svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none}label{display:block;margin-top:12px}input,button{font:inherit;padding:8px;max-width:100%;box-sizing:border-box}input[type=text]{width:100%}button{cursor:pointer;margin:6px 4px 6px 0}button:focus-visible,input:focus-visible{outline:3px solid #005fa3}rect{stroke:#00689d;stroke-width:2;fill:#00689d25}rect.selected{stroke:#b34700;fill:#b3470030}text{font:18px system-ui;fill:#783100;paint-order:stroke;stroke:white;stroke-width:3px}#status{white-space:pre-wrap;min-height:3em}#choices button{display:block}li button{width:100%;text-align:left}[hidden]{display:none!important}@media(max-width:800px){main{display:block}.stage{margin:12px}}
 </style>
-<header><h1>Open a floor plan</h1><p>Upload a PNG and locate windows or door leaves across the whole image. Inspect and correct the marked objects before using the count.</p></header>
+<header><h1>Open a floor plan</h1><p>Upload a PNG and locate windows or door leaves across the whole image. Inspect and correct the marked objects before using the count.</p><a href="/">Dataset examples</a></header>
 <main><aside>
 <label>Drawing <input id="file" type="file" accept="image/png"></label>
 <form id="ask"><label>Question <input id="question" type="text" required maxlength="2000" placeholder="Count all visible windows"></label><button id="inspect" type="submit" disabled>Inspect drawing</button></form>

@@ -14,6 +14,7 @@ import numpy as np
 MAX_BYTES = 25 * 1024 * 1024
 MAX_PIXELS = 40_000_000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+DEFAULT_DIRECTORY = Path(__file__).resolve().parents[2] / ".cache" / "uploads"
 
 
 class DrawingError(ValueError):

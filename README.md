@@ -28,9 +28,15 @@ echo "FEATHERLESS_API_KEY=..." > .env           # only the llm and vision lanes 
 ```
 stoa ask data/swiss_dwellings/<file>.pdf "How many doors are drawn on this floor plan?"
 stoa serve                                       # click-to-verify viewer on :8765
+stoa ask '/path/to/new floor plan.png' 'Count all visible windows'
 python -m stoa.eval.run --lane swiss --show-wrong 20
 make check                                       # tests + no-LLM accuracy gate (needs the dataset, no API key)
 ```
+
+Open `http://127.0.0.1:8765/upload` to inspect your own PNG without installing a
+dataset. Window and door-leaf counts remain unreviewed proposals until you inspect
+the marked objects. [PNG workflow and independent evaluation](docs/unseen-png.md)
+explain request limits, review corrections and current accuracy limitations.
 
 ## Team
 

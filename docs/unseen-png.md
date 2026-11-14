@@ -9,8 +9,11 @@ filters, measurements and scopes decline rather than silently count everything.
 ## Upload and review preview
 
 ```sh
-.venv/bin/python -m stoa.upload_api
-# Open http://127.0.0.1:8091/upload
+.venv/bin/stoa serve
+# Open http://127.0.0.1:8765/upload
+
+.venv/bin/stoa ask '/path/to/new floor plan.png' 'Count all visible windows'
+.venv/bin/stoa ask '/path/to/new floor plan.png' 'Count doors' --confirm-target door_leaf
 ```
 
 Choose a PNG from any folder. The server validates the contents and stores a
@@ -32,11 +35,13 @@ overlays use original source pixels. Save a reviewed count only after inspecting
 the full image. Downloads preserve the original machine result separately from
 the reviewer’s corrections; these corrections are model-assisted labels.
 
-`UploadAPI.handle(handler)` exposes mountable routes for the shared viewer:
+The shared viewer mounts `UploadAPI.handle(handler)` routes:
 `/upload`, `/api/uploads`, `/api/assets/<id>`, `/api/image-questions` and
-`/api/image-reviews`. Existing viewer/router/CLI files remain unchanged pending
-their owner’s handoff under AGENTS.md. Consequently the existing benchmark
-commands retain their current behavior; use this preview for the new boundary.
+`/api/image-reviews`. Dataset examples remain at `/`. Explicit existing local PNG
+paths bypass benchmark routing even when their filenames or directories resemble
+a different source. Benchmark-relative paths retain their benchmark adapters.
+For a separate integration preview, `python -m stoa.upload_api` serves the same
+upload routes on port 8091. Both entry points use the same asset store.
 
 ## Independent evaluation
 
