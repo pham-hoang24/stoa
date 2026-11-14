@@ -44,8 +44,13 @@ def render(path: Path, zoom: float | None = None) -> tuple[bytes, float]:
 
 def _rel(file: str) -> str:
     """Dataset-relative path ('data/...') of an evidence file, whatever form the lane stored."""
-    i = file.find("data/")
-    return file[i:] if i >= 0 else file
+    try:
+        return str(Path(file).resolve().relative_to(ROOT.resolve()))
+    except ValueError:
+        # A dataset can itself live under a parent named data/. Match the
+        # innermost source directory rather than that unrelated parent.
+        i = file.rfind("/data/")
+        return file[i + 1:] if i >= 0 else file
 
 
 def _note_fields(note: str) -> dict:

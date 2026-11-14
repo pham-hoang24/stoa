@@ -27,6 +27,12 @@ def test_rejects_symlink_pointing_outside(root):
     assert viewer._safe("data/link.pdf") is None
 
 
+def test_evidence_paths_ignore_a_parent_named_data(tmp_path, monkeypatch):
+    dataset = tmp_path / "data" / "preview"
+    monkeypatch.setattr(viewer, "ROOT", dataset)
+    assert viewer._rel(str(dataset / "data" / "swiss_dwellings" / "plan.pdf")) == "data/swiss_dwellings/plan.pdf"
+
+
 # --- presentation + evidence smoke -------------------------------------------------------------
 
 import json
