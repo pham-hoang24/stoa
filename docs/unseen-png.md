@@ -19,8 +19,8 @@ model request. Equivalent pixels share an ID even after renaming or re-encoding.
 The preview binds only to loopback. Images remain until this local cache is
 removed. Assessment history is bounded and expires when the server restarts.
 
-Live inspection **requires the bounded transport in PR #29**. On current main it
-declines without calling the old unbounded transport. Set `STOA_LLM_MAX_REQUESTS`
+Live inspection uses the bounded transport from PR #29, whose original commits
+are included in this feature branch. Set `STOA_LLM_MAX_REQUESTS`
 to a small process cap when using that transport; the application also preflights
 complete crop coverage against a maximum of nine inspection requests per task.
 No automatic retries occur. Invalid replies, incomplete coverage, uncertain

@@ -2,6 +2,7 @@
 import io
 import json
 from email.message import Message
+from types import SimpleNamespace
 
 from stoa.upload_api import UploadAPI
 from test_image_runtime import image, reply
@@ -76,3 +77,29 @@ def test_mount_and_page_are_independent_of_benchmark_viewer(tmp_path):
     assert api.handle(page) and page.code == 200
     assert b"Unreviewed model proposal" in page.wfile.getvalue()
     assert b"/api/image-reviews" in page.wfile.getvalue()
+
+
+def test_default_upload_adapter_reaches_bounded_transport(tmp_path, monkeypatch):
+    """Catch a preview shipped without its transport dependency, without billing."""
+    import openai
+    from stoa.lanes import llm
+
+    monkeypatch.setenv("STOA_LLM_API_KEY", "controlled-test-key")
+    monkeypatch.setenv("STOA_LLM_MAX_REQUESTS", "1")
+    monkeypatch.setattr(llm, "CACHE", tmp_path / "provider-cache")
+    monkeypatch.setattr(llm, "_USAGE", {"calls": 0, "cached": 0, "prompt_tokens": 0, "completion_tokens": 0})
+    requests = []
+
+    def client(**config):
+        assert config["max_retries"] == 0
+        def create(**request):
+            requests.append(request)
+            return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(content=reply([[100, 100, 200, 200]])))])
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+    monkeypatch.setattr(openai, "OpenAI", client)
+    api = UploadAPI(tmp_path / "assets")
+    drawing = api.assets.put(image())
+    result = api.question({"drawing": drawing.id, "question": "Count windows", "max_requests": 1})
+    assert result["status"] == "unreviewed", result["answer"]["note"]
+    assert result["answer"]["value"] == 1 and len(requests) == 1
