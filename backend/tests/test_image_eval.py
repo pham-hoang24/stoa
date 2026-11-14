@@ -80,3 +80,17 @@ def test_matching_is_one_to_one_and_finds_augmenting_path():
     assert match_boxes(proposals, references, 0.5) == (2, 0, 0)
     assert match_boxes(proposals + [proposals[1]], references, 0.5) == (2, 1, 0)
     assert match_boxes([], references) == (0, 0, 2)
+
+
+def test_compare_reports_deltas_and_rejects_mismatched_cases():
+    from stoa.image_eval import compare
+    rec = lambda d: {"drawing": d, "target": "window"}
+    base = {"split": "dev", "cases": 1, "exact_count_accuracy": .5, "precision": .8, "recall": None,
+            "abstentions": 1, "inspection_requests": 4, "records": [rec("a")]}
+    better = {**base, "exact_count_accuracy": .75, "records": [rec("a")]}
+    out = compare(base, better)
+    assert out["delta"]["exact_count_accuracy"] == .25 and out["delta"]["recall"] is None
+    with pytest.raises(ValueError, match="different cases"):
+        compare(base, {**base, "records": [rec("b")]})
+    with pytest.raises(ValueError, match="splits"):
+        compare(base, {**base, "split": "test"})
