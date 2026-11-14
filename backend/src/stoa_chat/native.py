@@ -20,17 +20,18 @@ def ifc_unit_scale(unit, kind):
     return None
 
 
-def ifc_facts(drawing):
+def ifc_facts(drawing, *, model=None, entities=None, include_properties=True):
     import ifcopenshell
     import ifcopenshell.util.element as element
-    model = ifcopenshell.open(str(drawing['path']))
+    if model is None:
+        model = ifcopenshell.open(str(drawing['path']))
     assignments = [p.UnitsInContext for p in model.by_type('IfcProject') if p.UnitsInContext]
     assigned = {u.UnitType:u for a in assignments for u in a.Units if hasattr(u,'UnitType')}
     dimensional = {'IfcQuantityLength':'length','IfcQuantityArea':'area','IfcQuantityVolume':'volume',
                    'IfcLengthMeasure':'length','IfcPositiveLengthMeasure':'length','IfcAreaMeasure':'area','IfcVolumeMeasure':'volume'}
     families = ['IfcWall','IfcDoor','IfcWindow','IfcSpace','IfcBuildingStorey','IfcSlab']
     facts, objects = [], []
-    for entity in model.by_type('IfcObject'):
+    for entity in model.by_type('IfcObject') if entities is None else entities:
         if not entity.GlobalId:
             continue
         evidence = {'drawing_id':drawing['id'],'entity_id':entity.GlobalId,'global_id':entity.GlobalId,
@@ -42,6 +43,8 @@ def ifc_facts(drawing):
             value=getattr(entity,attribute,None)
             if value:
                 facts.append({'id':entity.GlobalId+':'+attribute,'label':entity.is_a()+' '+attribute,'kind':'text','value':value,'unit':None,'evidence':{**evidence,'property':attribute,'source_value':value}})
+        if not include_properties:
+            continue
         for group, properties in element.get_psets(entity,verbose=True).items():
             for name, info in properties.items():
                 if name=='id' or not isinstance(info,dict) or not info.get('id'):

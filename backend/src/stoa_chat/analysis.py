@@ -20,7 +20,7 @@ def question_kind(question):
     for kind, pattern in [
         ('volume', r'volume|tilavuu|m³|cubic\s+met(?:re|er)s?'),
         ('area', r'area|pinta.ala|m²|square\s+met(?:re|er)s?|neliömet'),
-        ('count', r'how many|count|kuinka monta|montako|lukumäärä'),
+        ('count', r'how many|count|\bnumber\s+of\b|kuinka monta|montako|lukumäärä'),
         ('length', r'\b(?:length|long|width|wide|height|high|tall|distance|depth|deep|perimeter)\b|pitu|ympärys|levey|korkeu|etäisyy|syvyy')]:
         if re.search(pattern, q):
             return kind
@@ -112,12 +112,19 @@ class HybridAnswerer:
         answers = []
         from .extraction import extract
         for drawing in drawings:
-            data = inventory(drawing)
-            answer = native_answer(question,drawing,data,prior)
+            scoped_question, query = question, None
+            if drawing['format']=='ifc':
+                from .ifc_query import prepare
+                answer,data,scoped_question,query = prepare(question,drawing,prior)
+            else:
+                data = inventory(drawing)
+                answer = native_answer(question,drawing,data,prior)
             if answer is None:
-                scoped = {**context,'question':question,'drawing_ids':[drawing['id']],'drawings':[drawing],
+                scoped = {**context,'question':scoped_question,'drawing_ids':[drawing['id']],'drawings':[drawing],
                           'messages':[m for m in context['messages'] if m.get('drawing_ids')==selection]}
                 answer = extract(scoped,[data],question_kind(question))
+            if query:
+                answer['native_query'] = query
             answers.append(answer)
         if any(a['status'] in {'abstain','clarification'} for a in answers):
             if len(answers)==1:
@@ -143,8 +150,12 @@ class HybridAnswerer:
         answer['independent_scope'] = confirmed
         answer['contributions'] = [{'drawing_id':d['id'],'value':a['value'],'unit':a.get('unit'),
                                     'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status'),
-                                    **({'model_provenance':a['model_provenance']} if a.get('model_provenance') else {})}
+                                    **({'model_provenance':a['model_provenance']} if a.get('model_provenance') else {}),
+                                    **({'native_query':a['native_query']} if a.get('native_query') else {})}
                                    for d,a in zip(drawings,answers)]
+        if len(answers)>1 and any(a.get('native_query') for a in answers):
+            answer['native_query'] = {'scope':'independent_drawings','per_drawing':[
+                {'drawing_id':d['id'],**a['native_query']} for d,a in zip(drawings,answers) if a.get('native_query')]}
         sources = {d['id']:d for d in drawings}
         for ev in answer['evidence']:
             source = sources[ev['drawing_id']]
