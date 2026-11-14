@@ -27,7 +27,7 @@ def question_kind(question):
 def native_answer(question, drawing, data, prior_target=None):
     words = set(re.findall(r'[\wäöå]+', question.casefold()))
     target = next((t for t, aliases in TARGETS.items() if words.intersection(aliases)), None)
-    if not target and re.search(r'\b(their|them|those|niiden|niitä)\b', question.casefold()):
+    if not target and re.search(r'\b(its|their|them|those|niiden|niitä)\b', question.casefold()):
         target = prior_target
     kind = question_kind(question)
     if kind == 'text' and re.fullmatch(r'(what (text|labels) (is|are) on this drawing|show (all )?(text|labels)|näytä teksti)\??', question.casefold().strip()):
@@ -84,7 +84,7 @@ class HybridAnswerer:
         question = context['question']
         previous = next((m for m in reversed(context['messages']) if m['role']=='assistant'), None)
         prior = previous['answer'].get('target') if previous and previous.get('drawing_ids')==selection else None
-        if re.search(r'\b(their|them|those|niiden|niitä)\b',question.casefold()) and not prior:
+        if re.search(r'\b(its|their|them|those|niiden|niitä)\b',question.casefold()) and not prior:
             return clarify('Which objects do you mean? State the target for this selected drawing scope.')
         negated = bool(re.search(r'\b(not|no|never|ei|eivät|don.t)\b',question.casefold()))
         independent = not negated and bool(re.search(r'\b(are (?:all )?independent|are non.overlapping|confirm independent|erillisiä)\b',question.casefold()))
@@ -101,8 +101,9 @@ class HybridAnswerer:
             if len(drawings)>12:
                 return abstain('Select at most twelve independent drawings for one question.')
             if independent:
-                pieces = re.split(r'[.!]',question)
-                question = ' '.join(p for p in pieces if not re.search(r'independent|non.overlapping|erillisiä',p,re.I)).strip()
+                question = re.sub(
+                    r"\b(?:(?:yes|kyllä)[,\s]+)?(?:these(?: drawings| views)?|they|the drawings|all drawings)\s+are\s+(?:all\s+)?(?:independent|non.overlapping)\b|\b(?:I\s+)?confirm independent\b|\b(?:nämä ovat\s+)?erillisiä\b",
+                    '', question, flags=re.I).strip(' ,.!;:')
                 if not question or question.casefold() in {'yes','kyllä'}:
                     question = next((m['question'] for m in reversed(context['messages']) if m['role']=='user' and m.get('drawing_ids')==selection), '')
         answers = []

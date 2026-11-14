@@ -181,8 +181,18 @@ def svg_facts(drawing):
             scale=supplied
     except ValueError:
         pass
-    # Transform hierarchies, use references and styled text are left to rendering.
-    geometry_safe = not any(n.get('transform') or n.tag.split('}')[-1] in {'use','defs','symbol','mask','clipPath'} or n.get('display')=='none' or n.get('visibility')=='hidden' or 'display' in n.get('style','') for n in root.iter())
+    # The native inventory is authoritative only for plain visible geometry.
+    # CSS inheritance, paint, effects and transforms require rendered inspection;
+    # do not offer their entities as native refs either (including hidden text).
+    presentation = {'style', 'display', 'visibility', 'opacity', 'fill', 'stroke',
+                    'fill-opacity', 'stroke-opacity', 'stroke-width', 'color',
+                    'clip-path', 'mask', 'filter'}
+    geometry_safe = not any(
+        n.get('transform') or presentation.intersection(n.attrib)
+        or n.tag.split('}')[-1] in {'use', 'defs', 'symbol', 'mask', 'clipPath'}
+        for n in root.iter())
+    if not geometry_safe:
+        return {'objects': [], 'facts': [], 'complete': False}
     for index,node in enumerate(root.iter()):
         tag = node.tag.split('}')[-1]
         entity = node.get('id')
