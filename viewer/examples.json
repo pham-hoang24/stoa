@@ -1,0 +1,8 @@
+[
+  {"id": "swiss-area", "path": "swiss", "title": "Swiss room area", "file": "data/swiss_dwellings/site1000_bldg2082_floor9385.pdf",
+   "question": "What is the net floor area of room 2.10 ('Zimmer') in m²?", "needs_provider": false},
+  {"id": "ifc-count", "path": "ifc", "title": "IFC door count", "file": "data/ifc_models/bsc-esplanades_1807-ep-ar-v18_plan-04-4-korrus.pdf",
+   "question": "How many doors are there in the model 'Maleva tänav 18 korterelamu (Esplanades example model)'?", "needs_provider": false},
+  {"id": "raster-count", "path": "vision", "title": "Raster door count (live VLM)", "file": "data/cubicasa5k/colorful-11960.png",
+   "question": "How many doors are shown on this floor plan?", "needs_provider": true}
+]

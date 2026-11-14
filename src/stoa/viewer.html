@@ -1,38 +1,67 @@
-<!doctype html><meta charset="utf-8"><title>Stoa verify</title>
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stoa verify</title>
 <style>
-body{font:14px system-ui;margin:0;display:grid;grid-template-columns:360px 1fr;height:100vh}
+body{font:14px system-ui;margin:0;display:grid;grid-template-columns:380px 1fr;grid-template-rows:1fr auto;height:100vh}
 aside{padding:12px;overflow:auto;border-right:1px solid #ccc}
 main{overflow:auto;position:relative;background:#eee}
+footer{grid-column:1/3;border-top:1px solid #ccc;padding:6px 12px;font-size:12px;color:#444;background:#fafafa}
 input,textarea,button{width:100%;box-sizing:border-box;margin:4px 0;font:inherit}
+.ex{display:block;text-align:left;cursor:pointer}
 .chip{display:block;padding:4px 6px;margin:2px 0;border:1px solid #bbb;border-radius:4px;cursor:pointer}
-.chip:hover{background:#ffe9a8}
-#ans{font-size:28px;font-weight:600;margin:8px 0}
+.chip:hover,.chip.hot{background:#ffe9a8}
+.chip.nodraw{color:#777;border-style:dashed}
+#card{margin:8px 0;padding:8px;border:1px solid #888;border-radius:6px}
+#card.abstain{border:2px dashed #888;background:#f1f1f1;color:#444}
+#card.error{border:2px solid #b00;background:#fee}
+#val{font-size:28px;font-weight:600}
+#card.abstain #val,#card.error #val{font-size:16px;font-weight:600}
+dl{margin:6px 0 0;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:12px}dt{color:#666}dd{margin:0;word-break:break-word}
 #stage{position:relative;display:inline-block}
-.box{position:absolute;border:2px solid #e11;background:rgba(255,0,0,.12);pointer-events:none}
-.box.hot{border-color:#06f;background:rgba(0,100,255,.25)}
+#ov{position:absolute;left:0;top:0;pointer-events:none}
+.shape{fill:rgba(255,0,0,.12);stroke:#e11;stroke-width:2}
+.shape.hot{fill:rgba(0,100,255,.25);stroke:#06f}
+.badge{fill:#e11;font:bold 14px system-ui}
+.badge.hot{fill:#06f}
 </style>
 <aside>
+<div id="examples"></div>
 <input id="file" list="files" placeholder="file (data/…)"><datalist id="files"></datalist>
 <textarea id="q" rows="3" placeholder="question"></textarea>
 <button id="go">Ask</button>
-<div id="ans"></div><div id="meta"></div><div id="ev"></div>
+<div id="card" hidden><div id="val"></div><div id="why"></div><dl id="meta"></dl></div>
+<div id="ev"></div>
 </aside>
-<main><div id="stage"><img id="img"></div></main>
+<main><div id="stage"><img id="img" alt="drawing"><svg id="ov"></svg></div></main>
+<footer id="credit">Dataset: Junction construction drawings, non-commercial use only. Per-file credit and licence: data/&lt;source&gt;/LICENSE.md. Keep the credit when sharing a drawing.</footer>
 <script>
-const $=id=>document.getElementById(id);let zoom=2,evs=[];
-fetch('/api/files').then(r=>r.json()).then(fs=>{$('files').innerHTML=fs.map(f=>`<option value="${f}">`).join('')});
-function draw(hot){document.querySelectorAll('.box').forEach(b=>b.remove());
- evs.forEach((e,i)=>{if(!e.bbox)return;const[b0,b1,b2,b3]=e.bbox;const d=document.createElement('div');
-  d.className='box'+(i===hot?' hot':'');d.style.cssText=`left:${b0*zoom}px;top:${b1*zoom}px;width:${(b2-b0)*zoom}px;height:${(b3-b1)*zoom}px`;$('stage').appendChild(d)})}
-$('go').onclick=async()=>{
- const file=$('file').value;$('ans').textContent='…';
- const r=await fetch('/api/ask',{method:'POST',body:JSON.stringify({file,question:$('q').value})});const a=await r.json();
- $('ans').textContent=a.value===null?'(abstain)':a.value+(a.unit?' '+a.unit:'');$('meta').textContent=`lane: ${a.lane} ${a.note||''}`;
- evs=a.evidence||[];const pdf=evs.find(e=>e.file&&e.file.endsWith('.pdf'));const show=pdf?pdf.file:file;
- const m=show.indexOf('data/');const rel=m>=0?show.slice(m):show;
- const im=$('img');im.onload=()=>{zoom=+im.dataset.z||2;draw(-1)};
- const res=await fetch('/api/render?file='+encodeURIComponent(rel));zoom=+res.headers.get('X-Zoom')||2;im.dataset.z=zoom;im.src=URL.createObjectURL(await res.blob());
- $('ev').innerHTML=evs.slice(0,60).map((e,i)=>`<span class="chip" data-i="${i}">${e.label||e.global_id||'evidence'}</span>`).join('');
- document.querySelectorAll('.chip').forEach(c=>c.onmouseenter=()=>draw(+c.dataset.i));
-};
+const $=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
+let zoom=2,evs=[],hot=-1;
+const el=(t,props={},kids=[])=>{const e=document.createElement(t);Object.assign(e,props);kids.forEach(k=>e.append(k));return e};
+fetch('/api/files').then(r=>r.json()).then(fs=>{$('files').replaceChildren(...fs.map(f=>el('option',{value:f})))});
+fetch('/api/examples').then(r=>r.json()).then(xs=>{$('examples').replaceChildren(...xs.map(x=>el('button',{className:'ex',textContent:'Example: '+x.title,onclick:()=>{$('file').value=x.file;$('q').value=x.question;ask()}})))});
+function draw(){const ov=$('ov');ov.replaceChildren();
+ evs.forEach((e,i)=>{if(!e.drawable||e.source!==shown)return;const h=i===hot?' hot':'';
+  let g;if(e.polygon){g=document.createElementNS(NS,'polygon');g.setAttribute('points',e.polygon.map(p=>`${p[0]*zoom},${p[1]*zoom}`).join(' '))}
+  else{const[b0,b1,b2,b3]=e.bbox;g=document.createElementNS(NS,'rect');g.setAttribute('x',b0*zoom);g.setAttribute('y',b1*zoom);g.setAttribute('width',(b2-b0)*zoom);g.setAttribute('height',(b3-b1)*zoom)}
+  g.setAttribute('class','shape'+h);ov.append(g);
+  const t=document.createElementNS(NS,'text');t.setAttribute('class','badge'+h);t.setAttribute('x',e.bbox[0]*zoom+2);t.setAttribute('y',e.bbox[1]*zoom-3);t.textContent=e.n;ov.append(t)})}
+function mark(i){hot=i;document.querySelectorAll('.chip').forEach((c,j)=>c.classList.toggle('hot',j===i));draw()}
+let shown='';
+async function ask(){
+ const file=$('file').value;$('val').textContent='…';$('card').hidden=false;$('card').className='';
+ const r=await fetch('/api/ask',{method:'POST',body:JSON.stringify({file,question:$('q').value})});
+ if(!r.ok){$('card').className='error';$('val').textContent='Request failed';return}
+ const a=await r.json();
+ $('card').className=a.state==='answer'?'':a.state;
+ $('val').textContent=a.state==='answer'?a.value+(a.unit?' '+a.unit:''):(a.state==='abstain'?'No answer (abstained)':'Error');
+ $('why').textContent=a.reason||'';
+ const rows=[['Scope',a.scope],['Method',a.method],['Source',a.source||file],['Lane',a.lane],['Licence',a.licence]];
+ $('meta').replaceChildren(...rows.flatMap(([k,v])=>[el('dt',{textContent:k}),el('dd',{textContent:v})]));
+ $('credit').textContent=`Source licence: ${a.licence}. Dataset: Junction construction drawings, non-commercial use only; per-file credit in data/<source>/LICENSE.md.`;
+ evs=a.evidence||[];hot=-1;shown=a.source||file;
+ const im=$('img');im.onload=()=>{const o=$('ov');o.setAttribute('width',im.naturalWidth);o.setAttribute('height',im.naturalHeight);draw()};
+ const res=await fetch('/api/render?file='+encodeURIComponent(shown));
+ if(res.ok){zoom=+res.headers.get('X-Zoom')||2;im.src=URL.createObjectURL(await res.blob())}else{im.removeAttribute('src');$('ov').replaceChildren()}
+ $('ev').replaceChildren(...evs.slice(0,200).map((e,i)=>el('span',{className:'chip'+(e.drawable?'':' nodraw'),textContent:`${e.n}. ${e.label||e.global_id||'evidence'}${e.global_id&&e.label?' ['+e.global_id+']':''}${e.drawable?'':' (no overlay)'}`,onmouseenter:()=>mark(i)})));
+}
+$('go').onclick=ask;
 </script>
