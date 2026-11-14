@@ -9,11 +9,12 @@ Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, a
 - POST /api/chats/{chat_id}/questions JSON {question, drawing_ids?:[id]} → assistant message {id,role:'assistant',drawing_ids,answer}. Omitted drawing_ids inherits prior selected scope; first question must select explicitly. User and assistant messages persisted. Unknown/empty selections 400.
 - GET /api/chats/{chat_id}/assets/{drawing_id} → original source bytes, chat-scoped.
 - GET /api/chats/{chat_id}/evidence/{assistant_message_id}/{index} → evidence JSON, chat-scoped.
+- GET /api/chats/{chat_id}/previews/{drawing_id}/{page} → safe PNG with source mapping retained on evidence.
 - Errors JSON {error: readable string}, 400/403/404/413.
 
 Injected `answerer(context: dict) -> dict` is synchronous. Context: question, drawing_ids, messages (prior messages only), drawings (selected drawing metadata plus backend-private pathlib Path in `path`). Paths never sent over HTTP. Each drawing's pages has page (one-based), width,height,units where available. Metadata format lowercase png/jpeg/pdf/ifc/dxf/svg.
 
-Answer dict: status supported/proposal/estimate/clarification/abstain, value number/string/null, unit optional, explanation, evidence list. Extra serializable fields preserved (calculation, review status, etc). Evidence: drawing_id, page (one-based when paginated), bbox [x0,y0,x1,y1] optional in page source coordinates, entity_id optional. Backend adds evidence.url. Non-abstain substantive answers require scoped resolvable evidence; invalid answer output becomes persisted abstain. Actual provider engine belongs to #41. Default abstains. Exceptions become analysis_error abstains and preserve previous history.
+Answer dict: status supported/proposal/estimate/clarification/abstain, value number/string/null, unit optional, explanation, evidence list. Extra serializable fields preserved (calculation, review status, etc). Evidence: drawing_id, page (one-based when paginated), bbox [x0,y0,x1,y1] optional in page source coordinates, entity_id optional. Backend adds evidence.url. Non-abstain substantive answers require scoped resolvable evidence; invalid answer output becomes persisted abstain. The default hybrid engine uses native source facts first, then bounded extraction through the configured provider when needed. Native answers remain distinct from unreviewed visual proposals. Exceptions become analysis_error abstains and preserve previous history.
 
 Tests: actual ephemeral loopback HTTP; run with PYTHONPATH=backend/src /path/to/.venv/bin/python -m pytest backend/tests -q. Sandbox requires socket permission. No live-provider calls.
 
@@ -26,7 +27,7 @@ PYTHONPATH=backend/src .venv/bin/python -m stoa_chat --storage .cache/chat --por
 PYTHONPATH=backend/src .venv/bin/python -m pytest backend/tests -q
 ```
 
-`--frontend` is optional and serves an existing directory at `/`; it does not modify the pitch site. Scripts must be external files because the frontend content policy does not permit inline JavaScript. Original SVG is served with a restrictive sandbox policy; callers should render evidence safely rather than inserting SVG source into HTML.
+The CLI serves repository `frontend/` at `/` by default; `--frontend` overrides that directory; it does not modify the pitch site. Scripts must be external files because the frontend content policy does not permit inline JavaScript. Original SVG is served with a restrictive sandbox policy; callers should render evidence safely rather than inserting SVG source into HTML.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
 
@@ -34,4 +35,4 @@ Default upload limit is 50 MiB (`max_upload_bytes` argument); JSON requests are 
 
 Browser Host must be localhost or 127.0.0.1 with the current server port; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds only 127.0.0.1. This is a local prototype, with no authentication or remote deployment configuration.
 
-Public HTTP coverage: 11 tests passed on 2026-11-14, including restart, deletion/shared assets, all formats, multipage PDF, question/follow-up/evidence, malformed requests and answers, provider exceptions, unsafe SVG, scope isolation, and frontend path isolation. Controlled analysis tests verify application behavior, not perception accuracy. No provider was called.
+Public HTTP coverage: 31 tests passed on 2026-11-14, including restart, deletion/shared assets, all formats, multipage PDF, question/follow-up/evidence, malformed requests and answers, provider exceptions, unsafe SVG, scope isolation, and frontend path isolation. Controlled analysis tests verify application behavior, not perception accuracy. No provider was called.

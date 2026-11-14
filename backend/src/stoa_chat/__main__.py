@@ -1,4 +1,4 @@
-"""Run the local drawing chat server without benchmark or provider access."""
+"""Run the local drawing chat app with native facts and configured extraction."""
 import argparse
 from pathlib import Path
 
