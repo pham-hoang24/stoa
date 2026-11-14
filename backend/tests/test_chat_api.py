@@ -209,3 +209,45 @@ def test_binary_dxf_is_accepted_without_conversion_of_original(tmp_path):
         assert status == 201
         assert uploaded['entity_ids']
         assert request(base, path + '/assets/' + uploaded['id'])[1] == content
+
+
+def test_svg_presentation_styles_are_accepted_but_active_css_is_rejected(tmp_path):
+    with running(tmp_path) as base:
+        path = '/chats/' + request(base, '/chats', 'POST', {})[1]['id']
+        def upload(style):
+            content = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 20"><rect width="10" height="20" style="' + style + '"/></svg>').encode()
+            return request(base, path + '/uploads?filename=plan.svg', 'POST', content)
+        assert upload('fill:#fff;stroke:#000;stroke-width:0.5;opacity:0.8')[0] == 201
+        for style in ['fill:url(https://evil/x)', 'fill:u/**/rl(https://evil/x)',
+                      'fill:expression(alert(1))', '@import url(https://evil/x)',
+                      'fill:URL(&quot;https://evil/x&quot;)', 'behavior:url(#x)',
+                      'background-image:image-set(&quot;https://evil/x&quot; 1x)']:
+            assert upload(style)[0] == 400, style
+
+
+def test_svg_dimensions_without_viewbox_define_evidence_coordinates(tmp_path):
+    def answer(context):
+        return {'status': 'proposal', 'value': 'room', 'evidence': [
+            {'drawing_id': context['drawings'][0]['id'], 'page': 1, 'bbox': [0, 0, 100, 200]}]}
+    with running(tmp_path, answer) as base:
+        path = '/chats/' + request(base, '/chats', 'POST', {})[1]['id']
+        status, drawing = request(base, path + '/uploads?filename=plan.svg', 'POST',
+                                  b'<svg xmlns="http://www.w3.org/2000/svg" width="100px" height="200"><rect width="100" height="200"/></svg>')
+        assert status == 201
+        assert drawing['pages'] == [{'page': 1, 'width': 100, 'height': 200, 'origin': [0, 0], 'units': 'svg'}]
+        assert request(base, path + '/questions', 'POST', {'question': 'Label?', 'drawing_ids': [drawing['id']]})[1]['answer']['status'] == 'proposal'
+
+
+def test_oversized_raster_headers_are_rejected_before_decoding(tmp_path):
+    import struct
+    import zlib
+    image = bytearray(png())
+    image[16:24] = struct.pack('>II', 90001, 90001)
+    image[29:33] = struct.pack('>I', zlib.crc32(image[12:29]))
+    jpeg = b'\xff\xd8\xff\xc0' + struct.pack('>HBHHB', 17, 8, 65000, 65000, 3) + b'\x01\x11\x00\x02\x11\x00\x03\x11\x00\xff\xd9'
+    with running(tmp_path) as base:
+        path = '/chats/' + request(base, '/chats', 'POST', {})[1]['id']
+        for filename, content in [('huge.png', bytes(image)), ('huge.jpg', jpeg)]:
+            status, error = request(base, path + '/uploads?filename=' + filename, 'POST', content)
+            assert status == 400
+            assert error['error'] == 'Image exceeds 80 million pixels'
