@@ -154,7 +154,7 @@ def test_visual_boundaries_need_calibration_and_volume_needs_height(tmp_path, mo
         return json.dumps({**plan, 'complete':True, 'facts':[{**f,'page_ref':ref} for f in plan['facts']]})
     monkeypatch.setattr(llm,'chat',extract)
     boundary = {'kind':'boundary','bbox':[0,0,12,10],'polygon':[[0,0],[12,0],[12,10],[0,10]]}
-    calibration = {'kind':'scale','bbox':[1,1,3,3],'value':.5,'unit':'m/pixel','printed_text':'0.5 m/pixel'}
+    calibration = {'kind':'scale','bbox':[1,1,3,3],'value':3,'unit':'m','printed_text':'3 m','dimension_line':[[0,5],[6,5]]}
     with running(tmp_path) as base:
         path,drawing = upload(base,'plan.png',png())
         plan.update(operation='polygon_area',facts=[boundary,calibration])
@@ -309,3 +309,89 @@ def test_model_native_object_count_uses_real_handles_and_full_source_coverage(tm
         assert answer['value']==1,answer
         assert answer['status']=='proposal'
         assert answer['evidence'][0]['entity_handle'] in drawing['entity_ids']
+
+
+def test_visual_followup_keeps_target_but_new_selection_requires_clarification_and_restart(tmp_path,monkeypatch):
+    from stoa.lanes import llm
+    def extract(messages,**kwargs):
+        payload=json.loads(messages[-1]['content'][0]['text'])
+        page=payload['pages'][0]
+        if payload['kind']=='count':
+            return json.dumps({'operation':'count','complete':True,'coverage':[page['id']],
+                               'facts':[{'kind':'object','page_ref':page['id'],'bbox':[0,0,3,3],'label':'bench'}]})
+        assert payload['prior_questions']==['How many benches?']
+        return json.dumps({'operation':'sum','complete':True,'facts':[{'kind':'area','value':3,'unit':'m²','printed_text':'3 m²',
+                           'page_ref':page['id'],'bbox':[0,0,3,3]}]})
+    monkeypatch.setattr(llm,'chat',extract)
+    with running(tmp_path) as base:
+        path,a=upload(base,'bench.png',png())
+        assert ask(base,path,a,'How many benches?')['value']==1
+    with running(tmp_path) as base:
+        answer=ask(base,path,a,'What is their total area?')
+        assert answer['value']==3,answer
+        _,b=upload(base,'other.png',png(),path)
+        assert ask(base,path,b,'What is their total area?')['status']=='clarification'
+
+
+def test_partial_native_inventory_cannot_be_silently_dropped_from_multi_total(tmp_path):
+    import ifcopenshell
+    complete=model()
+    partial=ifcopenshell.file.from_string(model().decode())
+    for relation in list(partial.by_type('IfcRelDefinesByProperties'))[:1]:
+        partial.remove(relation)
+    with running(tmp_path) as base:
+        path,a=upload(base,'complete.ifc',complete)
+        _,b=upload(base,'partial.ifc',partial.to_string().encode(),path)
+        answer=request(base,path+'/questions','POST',{'question':'These are independent. What is the total area of walls?',
+                                                    'drawing_ids':[a['id'],b['id']]})[1]['answer']
+        assert answer['status']=='abstain' and answer['value'] is None
+
+
+def test_incomplete_and_fabricated_native_property_extraction_abstains(tmp_path,monkeypatch):
+    from stoa.lanes import llm
+    def bad(messages,**kwargs):
+        payload=json.loads(messages[-1]['content'][0]['text'])
+        ref=payload['facts'][0]['id']+':invented-property'
+        return json.dumps({'operation':'sum','complete':True,'facts':[{'ref':ref}]})
+    monkeypatch.setattr(llm,'chat',bad)
+    with running(tmp_path) as base:
+        path,drawing=upload(base,'native.ifc',model())
+        answer=ask(base,path,drawing,'What is the area of north-facing walls?')
+        assert answer['status']=='abstain' and answer['error']=='invalid_extraction'
+
+
+def test_rotated_pdf_text_regions_use_rendered_source_frame(tmp_path):
+    import pymupdf
+    pdf=pymupdf.open()
+    page=pdf.new_page(width=100,height=200)
+    page.insert_text((10,30),'SAUNA')
+    page.set_rotation(90)
+    with running(tmp_path) as base:
+        path,drawing=upload(base,'rotated.pdf',pdf.tobytes())
+        answer=ask(base,path,drawing,'What text is on this drawing?')
+        assert answer['value']=='SAUNA'
+        box=answer['evidence'][0]['bbox']
+        assert box[0]>150 and box[1]==10,box
+        assert answer['evidence'][0]['source_width']==200
+
+
+def test_svg_preview_viewport_matches_viewbox_frame(tmp_path,monkeypatch):
+    from stoa.lanes import llm
+    def extract(messages,**kwargs):
+        payload=json.loads(messages[-1]['content'][0]['text'])
+        page=payload['pages'][0]
+        assert page['width']==page['height']
+        return json.dumps({'operation':'count','complete':True,'coverage':[page['id']],'facts':[]})
+    monkeypatch.setattr(llm,'chat',extract)
+    with running(tmp_path) as base:
+        path,drawing=upload(base,'letterbox.svg',b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="10 20 100 100"><rect width="50" height="100" x="10" y="20"/></svg>')
+        assert ask(base,path,drawing,'How many saunas?')['value']==0
+
+
+def test_injected_answer_polygon_must_resolve_to_original_source_bounds(tmp_path):
+    def answer(context):
+        return {'status':'proposal','value':1,'evidence':[{'drawing_id':context['drawing_ids'][0],'page':1,
+                 'bbox':[0,0,3,3],'polygon':[[0,0],[999,0],[1,1]]}]}
+    with running(tmp_path,answer) as base:
+        path,drawing=upload(base,'source.png',png())
+        assert ask(base,path,drawing,'How many chairs?')['status']=='abstain'

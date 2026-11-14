@@ -152,7 +152,8 @@ def pdf_facts(drawing):
                 if not text:
                     continue
                 # Text layer regions can extend slightly beyond the crop box.
-                box = [max(0,block[0]),max(0,block[1]),min(page.rect.width,block[2]),min(page.rect.height,block[3])]
+                transformed=pymupdf.Rect(block[:4])*page.rotation_matrix
+                box = [max(0,transformed.x0),max(0,transformed.y0),min(page.rect.width,transformed.x1),min(page.rect.height,transformed.y1)]
                 if box[0] >= box[2] or box[1] >= box[3]:
                     continue
                 ev = page_evidence(drawing,number+1,box)
@@ -181,7 +182,7 @@ def svg_facts(drawing):
     except ValueError:
         pass
     # Transform hierarchies, use references and styled text are left to rendering.
-    geometry_safe = not any(n.get('transform') or n.tag.split('}')[-1] == 'use' for n in root.iter())
+    geometry_safe = not any(n.get('transform') or n.tag.split('}')[-1] in {'use','defs','symbol','mask','clipPath'} or n.get('display')=='none' or n.get('visibility')=='hidden' or 'display' in n.get('style','') for n in root.iter())
     for index,node in enumerate(root.iter()):
         tag = node.tag.split('}')[-1]
         entity = node.get('id')

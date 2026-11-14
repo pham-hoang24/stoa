@@ -18,7 +18,16 @@ def preview(drawing, page=1):
     elif format in {'pdf', 'svg'}:
         # SVG was validated during ingest. MuPDF rasterizes without browser scripts
         # or network resource resolution; uploaded SVG never enters the DOM.
-        document = pymupdf.open(stream=drawing['path'].read_bytes(), filetype=format)
+        content=drawing['path'].read_bytes()
+        if format=='svg':
+            import xml.etree.ElementTree as ET
+            root=ET.fromstring(content)
+            # Canonical viewport removes root sheet aspect-ratio letterboxing;
+            # all evidence stays in the original viewBox/user coordinate frame.
+            root.set('width',str(metadata['width']))
+            root.set('height',str(metadata['height']))
+            content=ET.tostring(root)
+        document = pymupdf.open(stream=content, filetype=format)
         if format == 'svg':
             converted = pymupdf.open('pdf', document.convert_to_pdf())
             document.close()

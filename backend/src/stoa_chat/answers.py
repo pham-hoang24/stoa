@@ -56,6 +56,19 @@ def validate_answer(answer, drawings):
                 x, y = p.get('origin', [0, 0])
                 if not (x <= box[0] < box[2] <= x + p['width'] and y <= box[1] < box[3] <= y + p['height']):
                     raise ValueError('Box is outside the original page')
+            polygon = reference.get('polygon')
+            if polygon is not None:
+                if page not in pages or not isinstance(polygon,list) or not 2 <= len(polygon) <= 1000:
+                    raise ValueError('Boundary requires an existing page and bounded vertices')
+                p=pages[page]
+                x,y=p.get('origin',[0,0])
+                for vertex in polygon:
+                    if not isinstance(vertex,list) or len(vertex)!=2 or any(type(n) not in {int,float} or not math.isfinite(n) for n in vertex):
+                        raise ValueError('Invalid boundary vertex')
+                    if not (x <= vertex[0] <= x+p['width'] and y <= vertex[1] <= y+p['height']):
+                        raise ValueError('Boundary outside original source')
+                    if box and not (box[0] <= vertex[0] <= box[2] and box[1] <= vertex[1] <= box[3]):
+                        raise ValueError('Boundary outside cited region')
         return answer
     except (TypeError, KeyError, AttributeError, OverflowError) as exc:
         raise ValueError('Malformed analysis output') from exc
