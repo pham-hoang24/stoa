@@ -111,7 +111,9 @@ def extract(context, catalogs, kind):
                'prior_questions': [m['question'] for m in context['messages'][-8:] if m['role'] == 'user'],
                'required_coverage': required_coverage, 'pages': list(pages.values()), 'facts': [{**f, 'id': ref} for ref,f in native.items()],
                'scope': [{'drawing_id': d['id'], 'total_pages': len(d['pages']), 'native_inventory_complete': c['complete']} for d,c in zip(context['drawings'], catalogs)]}
-    if len(native) > 2500 or sum(len(d['pages']) for d in context['drawings']) > MAX_PAGES:
+    if len(native) > 2500:
+        return abstain(f'The native selection has {len(native)} facts, exceeding the bounded extraction limit. Narrow the element selection or ask a native count/quantity.', 'native_fact_scope')
+    if sum(len(d['pages']) for d in context['drawings']) > MAX_PAGES:
         return abstain('Drawing exceeds bounded extraction scope; select fewer pages or a smaller drawing.')
     messages = [{'role':'system','content':INSTRUCTIONS},
                 {'role':'user','content':[{'type':'text','text':json.dumps(payload, ensure_ascii=False)}] + images}]

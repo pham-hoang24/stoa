@@ -65,3 +65,16 @@ Default upload limits are 512 MiB for IFC (`max_ifc_upload_bytes`) and 50 MiB fo
 Browser Host must be localhost or 127.0.0.1 with the current server port; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds only 127.0.0.1. This is a local prototype, with no authentication or remote deployment configuration.
 
 Public HTTP coverage: 31 tests passed on 2026-11-14, including restart, deletion/shared assets, all formats, multipage PDF, question/follow-up/evidence, malformed requests and answers, provider exceptions, unsafe SVG, scope isolation, and frontend path isolation. Controlled analysis tests verify application behavior, not perception accuracy. No provider was called.
+
+Uploaded IFC queries select the requested occurrence class (including subtypes) before
+reading properties. Unfiltered counts need only entity handles; source quantities are
+read only for selected elements. A quoted or trailing model title must match the
+upload filename/header or an unambiguous project/building title; otherwise the server
+asks for clarification. Unknown semantic modifiers remain for model interpretation
+using the selected class catalog, within the existing fact bound. Large unscoped
+questions ask for an element type instead of dumping all model properties.
+`native_query` records the class, operation, requested title and matched entity count;
+multiple drawings retain their individual query scopes. Empty typed inventories
+abstain: absence of IfcDoor occurrences does not prove the physical absence of doors.
+Missing GlobalIds cannot silently reduce a complete count. Native scope errors
+suggest narrowing elements rather than selecting nonexistent IFC pages.
