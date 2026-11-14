@@ -47,7 +47,7 @@ The timeout defaults to **60 seconds per provider attempt**; override it with
 `STOA_LLM_TIMEOUT_SECONDS=60`. Use fallback `none` to disable automatic fallthrough.
 Only SDK timeouts or HTTP 408/504 activate fallback. Authentication errors,
 rate limits, connection failures, HTTP 503 and other errors remain explicit.
-A secondary timeout stops the chain; there are at most two live attempts.
+A secondary timeout stops the chain; there are at most two live attempts per model call.
 Each attempt counts against `STOA_LLM_MAX_REQUESTS` (default 200 per process).
 Cached replies remain free, separated by provider/endpoint/model; fallback results
 are never cached as NVIDIA answers. Answer provenance identifies the actual

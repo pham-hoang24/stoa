@@ -218,3 +218,30 @@ def test_fallback_provider_metadata_persists_through_chat_api(sdk, tmp_path):
         assert provenance['provider']=='modal' and provenance['model']==MODAL_MODEL
         assert provenance['fallback_from']=='nvidia' and provenance['fallback_reason']=='timeout'
         assert request(base,path)[1]['messages'][-1]['answer']['model_provenance']==provenance
+
+
+def test_multi_drawing_answer_reports_each_actual_provider(sdk, tmp_path):
+    import cv2
+    import numpy as np
+    from chat.test_chat_api import running, request, png
+    nvidia_calls=0
+    def extract(config, completion):
+        nonlocal nvidia_calls
+        if config['base_url']==NVIDIA_BASE:
+            nvidia_calls+=1
+            if nvidia_calls==2:
+                raise timeout()
+        payload=json.loads(completion['messages'][-1]['content'][0]['text'])
+        return json.dumps({'operation':'count','complete':True,'coverage':payload['required_coverage'],
+                           'facts':[{'kind':'object','label':'box','page_ref':payload['pages'][0]['id'],'bbox':[1,1,8,8]}]})
+    sdk.handler=extract
+    with running(tmp_path/'chat') as base:
+        path='/chats/'+request(base,'/chats','POST',{})[1]['id']
+        second=cv2.imencode('.png',np.full((12,16,3),255,np.uint8))[1].tobytes()
+        drawings=[request(base,path+'/uploads?filename='+name,'POST',content)[1] for name,content in [('a.png',png()),('b.png',second)]]
+        answer=request(base,path+'/questions','POST',{'question':'These drawings are independent, how many boxes?',
+                                                      'drawing_ids':[d['id'] for d in drawings]})[1]['answer']
+        assert answer['value']==2
+        assert answer['model_provenance']['provider']=='mixed'
+        assert [p['provider'] for p in answer['model_provenance']['per_drawing']]==['nvidia','modal']
+        assert answer['contributions'][1]['model_provenance']['fallback_from']=='nvidia'

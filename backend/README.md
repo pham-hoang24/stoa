@@ -35,7 +35,8 @@ and `nvidia/nemotron-3.5-super-vl-120b-a12b` at `https://integrate.api.nvidia.co
 `--llm-provider` overrides `STOA_LLM_PROVIDER`. NVIDIA timeouts (SDK timeout or HTTP
 408/504) may use one selected secondary: `--llm-fallback modal|featherless|none`
 overrides `STOA_LLM_FALLBACK` (default Modal). Other API errors do not fall through;
-a secondary timeout ends the chain. SDK retries remain disabled. Both live attempts
+a secondary timeout ends the chain. SDK retries remain disabled. Each model call permits
+at most two live attempts, which
 share the process request cap; cached replies remain free and endpoint-specific.
 
 `--llm-timeout-seconds` overrides positive finite `STOA_LLM_TIMEOUT_SECONDS`
@@ -44,7 +45,8 @@ overrides, Modal uses `MODAL_API_KEY` with `STOA_MODAL_BASE_URL`/`STOA_MODAL_MOD
 and Featherless retains its existing `STOA_LLM_*` overrides. Explicit Modal or
 Featherless primary selection does not start the NVIDIA fallback chain.
 `model_provenance` reports the producing provider/model, cache status, and
-`fallback_from`/`fallback_reason` when used. No credential is included.
+`fallback_from`/`fallback_reason` when used. Multi-file totals retain per-drawing
+provenance and identify mixed providers explicitly. No credential is included.
 See the root README for runnable configuration.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
