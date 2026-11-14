@@ -61,7 +61,7 @@ async function ask(){
  const im=$('img');im.onload=()=>{const o=$('ov');o.setAttribute('width',im.naturalWidth);o.setAttribute('height',im.naturalHeight);draw()};
  const res=await fetch('/api/render?file='+encodeURIComponent(shown));
  if(res.ok){zoom=+res.headers.get('X-Zoom')||2;im.src=URL.createObjectURL(await res.blob())}else{im.removeAttribute('src');$('ov').replaceChildren()}
- $('ev').replaceChildren(...evs.slice(0,200).map((e,i)=>el('span',{className:'chip'+(e.drawable?'':' nodraw'),textContent:`${e.n}. ${e.label||e.global_id||'evidence'}${e.global_id&&e.label?' ['+e.global_id+']':''}${e.drawable?'':' (no overlay)'}`,onmouseenter:()=>mark(i)})));
+ $('ev').replaceChildren(...evs.map((e,i)=>el('span',{className:'chip'+(e.drawable?'':' nodraw'),textContent:`${e.n}. ${e.label||e.global_id||'evidence'}${e.global_id&&e.label?' ['+e.global_id+']':''}${e.drawable?'':' (no overlay)'}`,onmouseenter:()=>mark(i)})));
 }
 $('go').onclick=ask;
 </script>

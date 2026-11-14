@@ -139,3 +139,11 @@ def test_raster_example_opens_image_and_numbers_markers(server, monkeypatch):
 def test_server_serves_examples_and_page(server):
     assert len(json.loads(_get(server + "/api/examples")[0])) == len(EXAMPLES)
     assert b"LICENSE.md" in _get(server + "/")[0]
+
+
+def test_present_keeps_every_contributing_element():
+    """Complete inventory (PRD #4): large IFC counts must not be truncated before the page."""
+    evidence = [{"file": "data/ifc_models/a.ifc", "global_id": f"G{i:04d}"} for i in range(500)]
+    p = viewer.present({"value": 500, "unit": "count", "lane": "ifc", "evidence": evidence})
+    assert [e["global_id"] for e in p["evidence"]] == [f"G{i:04d}" for i in range(500)]
+    assert [e["n"] for e in p["evidence"]][-1] == 500

@@ -3,7 +3,7 @@
 At the Evidence boundary, PDF and SVG boxes are (x0, y0, x1, y1) in
 72-point rendered-page coordinates, with origin at the top left and y down.
 SVG viewBox offsets, physical dimensions, transforms and arcs are handled by
-MuPDF. A PDF twin must have the same viewport; an incompatible page is never
+MuPDF. A PDF sibling must have the same viewport; an incompatible page is never
 stretched to fit. Entries without a projection retain their IFC citation.
 """
 from __future__ import annotations
