@@ -4,7 +4,9 @@ import hashlib
 import os
 import mimetypes
 import sqlite3
+import sys
 import threading
+import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -109,14 +111,66 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 host_header = self.headers.get('Host', '')
                 if host_header not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
                     raise ApiError(403, 'Host is not allowed')
-                with store.lock:
-                    self.route()
+                self.route()
             except ApiError as exc:
                 self.respond(exc.status, {'error': exc.message})
             except (OSError, sqlite3.Error):
                 self.respond(500, {'error': 'Local storage is unavailable; please retry'})
+            except Exception:
+                traceback.print_exc(file=sys.stderr)
+                try:
+                    self.respond(500, {'error': 'Internal server error'})
+                except OSError:
+                    pass
 
         def route(self):
+            parts = unquote(urlsplit(self.path).path).strip('/').split('/')
+            if len(parts) == 4 and parts[:2] == ['api', 'chats'] and parts[3] == 'questions' and self.command == 'POST':
+                return self.ask(parts[2])
+            with store.lock:
+                return self.locked_route()
+
+        def ask(self, chat_id):
+            # The lock covers store access only, never the (slow) answerer call.
+            with store.lock:
+                store.get(chat_id)
+            data = self.read_json()
+            question = data.get('question')
+            with store.lock:
+                chat = store.get(chat_id)
+                selection = data.get('drawing_ids', chat['selected_drawing_ids'])
+                if not isinstance(question, str) or not question.strip() or len(question) > 10000:
+                    raise ApiError(400, 'A nonempty question is required')
+                if not isinstance(selection, list) or not selection or any(not isinstance(i, str) or i not in [d['id'] for d in chat['drawings']] for i in selection) or len(selection) != len(set(selection)):
+                    raise ApiError(400, 'Select drawings belonging to this chat')
+                context = {'question': question, 'drawing_ids': selection, 'messages': chat['messages'][:],
+                           'drawings': [{**d, 'path': store.assets / d['sha256']} for d in chat['drawings'] if d['id'] in selection]}
+                chat['selected_drawing_ids'] = selection
+                user_message = {'id': uuid.uuid4().hex, 'role': 'user', 'question': question, 'drawing_ids': selection}
+                chat['messages'].append(user_message)
+                store.save(chat)
+            try:
+                answer = answerer(context) if answerer else abstain('Analysis service is not configured')
+            except Exception:
+                answer = abstain('Analysis failed; please retry', 'analysis_error')
+            try:
+                answer = validate_answer(answer, context['drawings'])
+            except ValueError:
+                answer = abstain('Analysis returned invalid or unresolvable evidence', 'invalid_analysis')
+            message = {'id': uuid.uuid4().hex, 'role': 'assistant', 'drawing_ids': selection, 'answer': answer}
+            for index, evidence in enumerate(answer.get('evidence', [])):
+                evidence['url'] = '/api/chats/' + chat_id + '/evidence/' + message['id'] + '/' + str(index)
+            with store.lock:
+                chat = store.get(chat_id)  # 404 if the chat was deleted meanwhile; never resurrected
+                ids = [m['id'] for m in chat['messages']]
+                if user_message['id'] not in ids:
+                    raise ApiError(404, 'Chat not found')
+                # Place the answer right after its own question so concurrent questions stay paired.
+                chat['messages'].insert(ids.index(user_message['id']) + 1, message)
+                store.save(chat)
+            return self.respond(200, message)
+
+        def locked_route(self):
             path = unquote(urlsplit(self.path).path)
             if static_dir is not None and self.command == 'GET' and not path.startswith('/api/'):
                 root = Path(static_dir).resolve()
@@ -206,33 +260,6 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                     self.end_headers()
                     self.wfile.write(body)
                     return
-                if parts[3] == 'questions' and len(parts) == 4 and self.command == 'POST':
-                    data = self.read_json()
-                    question = data.get('question')
-                    selection = data.get('drawing_ids', chat['selected_drawing_ids'])
-                    if not isinstance(question, str) or not question.strip() or len(question) > 10000:
-                        raise ApiError(400, 'A nonempty question is required')
-                    if not isinstance(selection, list) or not selection or any(not isinstance(i, str) or i not in [d['id'] for d in chat['drawings']] for i in selection) or len(selection) != len(set(selection)):
-                        raise ApiError(400, 'Select drawings belonging to this chat')
-                    context = {'question': question, 'drawing_ids': selection, 'messages': chat['messages'][:],
-                               'drawings': [{**d, 'path': store.assets / d['sha256']} for d in chat['drawings'] if d['id'] in selection]}
-                    chat['selected_drawing_ids'] = selection
-                    chat['messages'].append({'id': uuid.uuid4().hex, 'role': 'user', 'question': question, 'drawing_ids': selection})
-                    store.save(chat)
-                    try:
-                        answer = answerer(context) if answerer else abstain('Analysis service is not configured')
-                    except Exception:
-                        answer = abstain('Analysis failed; please retry', 'analysis_error')
-                    try:
-                        answer = validate_answer(answer, context['drawings'])
-                    except ValueError:
-                        answer = abstain('Analysis returned invalid or unresolvable evidence', 'invalid_analysis')
-                    message = {'id': uuid.uuid4().hex, 'role': 'assistant', 'drawing_ids': selection, 'answer': answer}
-                    for index, evidence in enumerate(answer.get('evidence', [])):
-                        evidence['url'] = base + '/evidence/' + message['id'] + '/' + str(index)
-                    chat['messages'].append(message)
-                    store.save(chat)
-                    return self.respond(200, message)
                 if parts[3] == 'evidence' and len(parts) == 6 and self.command == 'GET':
                     for message in chat['messages']:
                         if message['id'] == parts[4] and message['role'] == 'assistant':
