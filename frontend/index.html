@@ -12,35 +12,47 @@
     <div class="workspace">
       <aside class="sidebar">
         <a class="brand" href="/" aria-label="Stoa drawing desk"
-          ><span class="brandmark">S</span> stoa<span class="local"
-            >LOCAL</span
-          ></a
-        ><button id="new-chat" class="primary">＋ New conversation</button>
-        <h2 class="eyebrow">YOUR CONVERSATIONS</h2>
+          ><span class="brandmark">S</span> stoa<span class="local">Local</span></a
+        ><button id="new-chat" class="primary">
+          <span aria-hidden="true">+</span> New conversation
+        </button>
+        <h2 class="side-heading">Conversations</h2>
         <nav id="chats" aria-label="Conversations"></nav>
         <div class="sidebar-note">
-          <span class="dot"></span> Your local drawing desk
+          <span class="dot"></span> Saved on this computer
           <p>
-            Conversations and originals are saved locally. Selected content may
-            be sent to your configured model.
+            Conversations and originals stay on this computer. Selected content
+            may be sent to your configured model.
           </p>
         </div>
       </aside>
       <main>
         <header class="topbar">
-          <div>
-            <div class="eyebrow">DRAWING INTELLIGENCE</div>
-            <h1 id="chat-title">A clearer view of your drawings.</h1>
-          </div>
+          <h1 id="chat-title">Drawing desk</h1>
           <button id="delete-chat" class="quiet" hidden>Delete chat</button>
         </header>
-        <section class="drawings" aria-labelledby="drawings-heading">
+        <section
+          class="drawings"
+          id="sources"
+          aria-labelledby="drawings-heading"
+          hidden
+        >
           <div class="section-line">
-            <h2 id="drawings-heading">
-              Drawing set <span id="drawing-count">0</span>
-            </h2>
+            <button
+              type="button"
+              id="sources-toggle"
+              class="sources-toggle"
+              aria-expanded="true"
+              aria-controls="sources-body"
+            >
+              <span class="sources-chevron" aria-hidden="true">▾</span>
+              <h2 id="drawings-heading">
+                Sources <span id="drawing-count">(0)</span>
+              </h2>
+              <span id="sources-summary" class="sources-summary"></span>
+            </button>
             <label class="upload-button"
-              >＋ Add drawings<input
+              ><span aria-hidden="true">+</span> Add drawings<input
                 id="upload"
                 type="file"
                 multiple
@@ -48,11 +60,12 @@
                 disabled
             /></label>
           </div>
-          <div id="drawing-list"></div>
-          <p id="upload-hint" class="hint">
-            PNG · JPEG · PDF · IFC · DXF · SVG. Loading upload limits… Create a
-            conversation to begin.
-          </p>
+          <div id="sources-body">
+            <div id="drawing-list"></div>
+            <p id="upload-hint" class="hint">
+              PNG · JPEG · PDF · IFC · DXF · SVG.
+            </p>
+          </div>
         </section>
         <div id="notice" role="status" aria-live="polite"></div>
         <section
@@ -61,7 +74,7 @@
           aria-live="polite"
         ></section>
         <form id="ask">
-          <div id="scope" class="hint">Select drawings to ask a question</div>
+          <div id="scope" class="hint">Add a drawing to start asking</div>
           <label for="question" class="sr-only"
             >Question about selected drawings</label
           >
@@ -74,11 +87,12 @@
               required
             ></textarea
             ><button id="send" class="primary" type="submit" disabled>
-              Ask ↗
+              Ask question
             </button>
           </div>
           <div class="composer-footer">
-            <span>Enter to send · Shift + Enter for a new line</span
+            <span
+              >Enter to send · Shift + Enter for a new line · / to jump here</span
             ><span>Every quantity needs evidence.</span>
           </div>
         </form>
@@ -89,34 +103,20 @@
         aria-label="Evidence inspector"
       >
         <div class="section-line">
-          <div class="eyebrow">SOURCE INSPECTOR</div>
+          <h2 class="panel-heading">Evidence</h2>
           <button id="close-evidence" class="quiet" hidden>Close</button>
         </div>
-        <div id="evidence">
-          <div class="evidence-empty">
-            <div class="blueprint-icon">⌗</div>
-            <h2>Evidence, in view.</h2>
-            <p>
-              Open a source reference beside an answer to inspect its drawing,
-              highlighted region and calculation.
-            </p>
-            <div class="legend">
-              <span>01 &nbsp; Source drawing</span
-              ><span>02 &nbsp; Facts &amp; entities</span
-              ><span>03 &nbsp; Calculation</span>
-            </div>
-          </div>
-        </div>
+        <div id="evidence"></div>
       </aside>
     </div>
     <dialog id="delete-dialog">
       <h2>Delete this conversation?</h2>
       <p>
         Its messages and unshared uploads will be permanently removed from local
-        storage.
+        storage. This cannot be undone.
       </p>
       <div class="dialog-actions">
-        <button id="cancel-delete">Keep conversation</button
+        <button id="cancel-delete" autofocus>Keep conversation</button
         ><button id="confirm-delete" class="danger">Delete conversation</button>
       </div>
     </dialog>
