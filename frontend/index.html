@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Stoa · Drawing desk</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a href="#question" class="skip">Skip to question</a>
+    <div class="workspace">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Stoa drawing desk"
+          ><span class="brandmark">S</span> stoa<span class="local"
+            >LOCAL</span
+          ></a
+        ><button id="new-chat" class="primary">＋ New conversation</button>
+        <h2 class="eyebrow">YOUR CONVERSATIONS</h2>
+        <nav id="chats" aria-label="Conversations"></nav>
+        <div class="sidebar-note">
+          <span class="dot"></span> Your local drawing desk
+          <p>
+            Conversations and originals are saved locally. Selected content may
+            be sent to your configured model.
+          </p>
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">DRAWING INTELLIGENCE</div>
+            <h1 id="chat-title">A clearer view of your drawings.</h1>
+          </div>
+          <button id="delete-chat" class="quiet" hidden>Delete chat</button>
+        </header>
+        <section class="drawings" aria-labelledby="drawings-heading">
+          <div class="section-line">
+            <h2 id="drawings-heading">
+              Drawing set <span id="drawing-count">0</span>
+            </h2>
+            <label class="upload-button"
+              >＋ Add drawings<input
+                id="upload"
+                type="file"
+                multiple
+                accept=".png,.jpg,.jpeg,.pdf,.ifc,.dxf,.svg"
+                disabled
+            /></label>
+          </div>
+          <div id="drawing-list"></div>
+          <p id="upload-hint" class="hint">
+            PNG · JPEG · PDF · IFC · DXF · SVG · up to 50 MiB each. Create a
+            conversation to begin.
+          </p>
+        </section>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <section
+          id="messages"
+          aria-label="Conversation"
+          aria-live="polite"
+        ></section>
+        <form id="ask">
+          <div id="scope" class="hint">Select drawings to ask a question</div>
+          <label for="question" class="sr-only"
+            >Question about selected drawings</label
+          >
+          <div class="composer">
+            <textarea
+              id="question"
+              rows="2"
+              placeholder="Ask about rooms, quantities, dimensions…"
+              maxlength="10000"
+              required
+            ></textarea
+            ><button id="send" class="primary" type="submit" disabled>
+              Ask ↗
+            </button>
+          </div>
+          <div class="composer-footer">
+            <span>Enter to send · Shift + Enter for a new line</span
+            ><span>Every quantity needs evidence.</span>
+          </div>
+        </form>
+      </main>
+      <aside
+        id="evidence-panel"
+        class="evidence-panel"
+        aria-label="Evidence inspector"
+      >
+        <div class="section-line">
+          <div class="eyebrow">SOURCE INSPECTOR</div>
+          <button id="close-evidence" class="quiet" hidden>Close</button>
+        </div>
+        <div id="evidence">
+          <div class="evidence-empty">
+            <div class="blueprint-icon">⌗</div>
+            <h2>Evidence, in view.</h2>
+            <p>
+              Open a source reference beside an answer to inspect its drawing,
+              highlighted region and calculation.
+            </p>
+            <div class="legend">
+              <span>01 &nbsp; Source drawing</span
+              ><span>02 &nbsp; Facts &amp; entities</span
+              ><span>03 &nbsp; Calculation</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <dialog id="delete-dialog">
+      <h2>Delete this conversation?</h2>
+      <p>
+        Its messages and unshared uploads will be permanently removed from local
+        storage.
+      </p>
+      <div class="dialog-actions">
+        <button id="cancel-delete">Keep conversation</button
+        ><button id="confirm-delete" class="danger">Delete conversation</button>
+      </div>
+    </dialog>
+  </body>
+</html>

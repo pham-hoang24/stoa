@@ -69,8 +69,8 @@ Fill this in at kickoff, as soon as the project is split up.
 
 | Area | Owner (GitHub login) | Folders |
 |---|---|---|
-| Eval harness, router, viewer, team lead | `@pham-hoang24` | `src/stoa/eval/`, `src/stoa/router.py`, `viewer/` |
-| IFC lane | `@z0rhan` | `src/stoa/lanes/ifc.py` |
-| Swiss DXF/PDF lane | `@pham-hoang24` | `src/stoa/lanes/swiss.py` |
-| CubiCasa PNG vision lane, LLM client and doc lane | `@pham-hoang24` | `src/stoa/lanes/vision.py`, `src/stoa/lanes/llm.py` |
-| IFC overlay and IFC-Bench text | `@z0rhan` | `src/stoa/lanes/ifc_overlay.py`, `src/stoa/lanes/ifc_text.py`, `src/stoa/text_score.py` |
+| Eval harness, router, viewer, team lead | `@pham-hoang24` | `backend/src/stoa/eval/`, `backend/src/stoa/router.py`, `viewer/` |
+| IFC lane | `@z0rhan` | `backend/src/stoa/lanes/ifc.py` |
+| Swiss DXF/PDF lane | `@pham-hoang24` | `backend/src/stoa/lanes/swiss.py` |
+| CubiCasa PNG vision lane, LLM client and doc lane | `@pham-hoang24` | `backend/src/stoa/lanes/vision.py`, `backend/src/stoa/lanes/llm.py` |
+| IFC overlay and IFC-Bench text | `@z0rhan` | `backend/src/stoa/lanes/ifc_overlay.py`, `backend/src/stoa/lanes/ifc_text.py`, `backend/src/stoa/text_score.py` |

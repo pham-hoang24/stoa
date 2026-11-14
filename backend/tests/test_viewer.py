@@ -40,7 +40,7 @@ import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from conftest import needs_data
+from legacy_support import needs_data
 from stoa import cli
 from stoa.data import ROOT as DATA_ROOT
 

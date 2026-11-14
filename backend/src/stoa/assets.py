@@ -6,6 +6,7 @@ import re
 import struct
 import tempfile
 from dataclasses import dataclass, field
+from stoa.project import ROOT as PROJECT_ROOT
 from pathlib import Path
 
 import cv2
@@ -14,7 +15,7 @@ import numpy as np
 MAX_BYTES = 25 * 1024 * 1024
 MAX_PIXELS = 40_000_000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-DEFAULT_DIRECTORY = Path(__file__).resolve().parents[2] / ".cache" / "uploads"
+DEFAULT_DIRECTORY = PROJECT_ROOT / ".cache" / "uploads"
 
 
 class DrawingError(ValueError):

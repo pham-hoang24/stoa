@@ -1,7 +1,7 @@
 """Seam: the Swiss lane through router.answer. Expected values are dataset ground truth (questions.jsonl), not recomputed."""
 import pytest
 
-from conftest import ask as ask_about, needs_data
+from legacy_support import ask as ask_about, needs_data
 
 FLOOR = "data/swiss_dwellings/site1000_bldg2082_floor9385.pdf"
 pytestmark = needs_data

@@ -265,6 +265,8 @@ def test_selected_full_dataset_pdf_uses_companion_quantity_units(monkeypatch, qu
 def test_all_missing_fzk_model_questions_abstain():
     if not (data.ROOT / "questions.jsonl").exists():
         pytest.skip("dataset not available")
+    if any((data.ROOT / "data" / "ifc_models").glob("*fzk*.ifc")):
+        pytest.skip("missing-model fixture is now present; independent missing-companion cases remain covered")
     qs = [q for q in data.load_questions() if q.source == "ifc_models" and "fzk" in q.path]
     assert qs
     for q in qs:

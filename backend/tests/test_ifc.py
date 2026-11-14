@@ -1,7 +1,7 @@
 """Seam: the IFC lane through router.answer, against ground truth literals."""
 import pytest
 
-from conftest import ask, needs_data
+from legacy_support import ask, needs_data
 
 pytestmark = needs_data
 ESPLANADES = "data/ifc_models/bsc-esplanades_1807-ep-ar-v18.ifc"
