@@ -55,9 +55,10 @@ def test_visual_count_maps_preview_regions_and_keeps_unreviewed_state(tmp_path, 
     from stoa.lanes import llm
     def extract(messages, **kwargs):
         payload = json.loads(messages[-1]['content'][0]['text'])
-        page = payload['pages'][0]
-        assert page['width'] == 1600 and page['source_width'] == 3200
-        return json.dumps({'operation': 'count', 'complete': True, 'coverage': [page['id']],
+        assert payload['pages'][0]['width']==1600
+        page = next(p for p in payload['pages'] if p.get('role')=='detail')
+        assert page['width'] == 1400 and page['source_width'] == 3200
+        return json.dumps({'operation': 'count', 'complete': True, 'coverage': payload['required_coverage'],
                            'facts': [{'page_ref': page['id'], 'bbox': [100, 50, 200, 150], 'kind': 'object', 'label': 'sauna'}]})
     monkeypatch.setattr(llm, 'chat', extract)
     image = cv2.imencode('.png', np.zeros((800,3200,3), dtype=np.uint8))[1].tobytes()
@@ -68,7 +69,7 @@ def test_visual_count_maps_preview_regions_and_keeps_unreviewed_state(tmp_path, 
         assert answer['status'] == 'proposal'
         assert answer['review_status'] == 'unreviewed'
         evidence = answer['evidence'][0]
-        assert evidence['bbox'] == [200,100,400,300]
+        assert evidence['bbox'] == [100,50,200,150]
         assert evidence['source_width'] == 3200
         preview = request(base, evidence['preview_url'].removeprefix('/api'))
         assert preview[0] == 200 and preview[1].startswith(b'\x89PNG')

@@ -28,3 +28,9 @@ and deletes the chats. It captures desktop/mobile
 screenshots under `/private/tmp/stoa42-*.png`, checks mobile width and JS exceptions.
 Stop the owned fixture server/browser afterwards. Fixture storage is
 `/private/tmp/stoa42-browser-data`; use a fresh directory/profile for isolated runs.
+
+Large PNG/JPEG answers show completed/required image-region coverage. Evidence stays
+in original source coordinates even when extracted from detailed crops. The smoke
+fixture exercises that coverage and crop-to-original highlight alignment. For an
+isolated run, set `STOA_SMOKE_STORAGE`/`STOA_SMOKE_PORT` on the fixture server and
+`STOA_SMOKE_CDP_URL`/`STOA_SMOKE_APP_URL` on the Node smoke script.

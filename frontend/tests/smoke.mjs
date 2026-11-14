@@ -1,6 +1,8 @@
 // Run against an owned Brave CDP session on 9224 and controlled server on 8093.
 import { writeFileSync } from "node:fs";
-const tabs = await (await fetch("http://127.0.0.1:9224/json/list")).json();
+const cdpUrl = process.env.STOA_SMOKE_CDP_URL || "http://127.0.0.1:9224";
+const appUrl = process.env.STOA_SMOKE_APP_URL || "http://127.0.0.1:8093";
+const tabs = await (await fetch(cdpUrl + "/json/list")).json();
 const ws = new WebSocket(tabs[0].webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let serial = 0;
@@ -34,7 +36,7 @@ const wait = (expression) =>
   );
 await send("Runtime.enable");
 await send("Page.enable");
-await send("Page.navigate", { url: "http://127.0.0.1:8093/" });
+await send("Page.navigate", { url: appUrl + "/" });
 await wait(`document.querySelector('#new-chat')&&!document.querySelector('#new-chat').disabled`);
 await evaluate(`document.querySelector('#new-chat').click()`);
 await wait(
@@ -60,6 +62,7 @@ const ask = async (question) => {
 };
 await ask("Kuinka monta saunaa?");
 await wait(`document.querySelector('.badge.proposal')`);
+await wait(`document.querySelector('.message.assistant').textContent.includes('Image region coverage: 3 / 3')`);
 await evaluate(`document.querySelector('.citation').click()`);
 await wait(
   `document.querySelector('.preview img')?.naturalWidth>0&&document.querySelector('.preview rect')`,

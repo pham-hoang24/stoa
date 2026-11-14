@@ -158,6 +158,12 @@ function renderMessages() {
       card.append(
         element("div", "", a.explanation || "No explanation available."),
       );
+      if (a.image_processing) {
+        const required = a.image_processing.required_views;
+        const completed = a.image_processing.completed_views;
+        if (Array.isArray(required) && Array.isArray(completed))
+          card.append(element("p", "hint", `Image region coverage: ${completed.length} / ${required.length}`));
+      }
       if (error) card.append(element("p", "hint", String(error)));
       const citations = element("div", "citations");
       (a.evidence || []).forEach((e, i) => {
