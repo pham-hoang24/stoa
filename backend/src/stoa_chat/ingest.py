@@ -1,5 +1,4 @@
 """Validate original contents without benchmark metadata or external fetching."""
-import io
 import math
 import re
 import struct
@@ -52,16 +51,15 @@ def inspect_upload(filename, content):
                 raise ValueError('IFC has no entities')
             entities = [e.GlobalId for e in model.by_type('IfcRoot') if e.GlobalId]
         elif format == 'dxf':
-            if content.startswith(b'AutoCAD Binary DXF\r\n\x1a\x00'):
-                with tempfile.NamedTemporaryFile(suffix='.dxf') as temporary:
-                    temporary.write(content)
-                    temporary.flush()
-                    document = ezdxf.readfile(temporary.name)
-            else:
-                text = content.decode('utf-8-sig')
-                if not re.search(r'\bEOF\s*$', text):
-                    raise ValueError('Expected complete DXF contents')
-                document = ezdxf.read(io.StringIO(text))
+            binary = content.startswith(b'AutoCAD Binary DXF\r\n\x1a\x00')
+            if not binary and not re.search(br'\bEOF\s*$', content):
+                raise ValueError('Expected complete DXF contents')
+            # ezdxf detects the declared legacy code page (and modern UTF-8).
+            # Parse a temporary copy; the original uploaded bytes stay immutable.
+            with tempfile.NamedTemporaryFile(suffix='.dxf') as temporary:
+                temporary.write(content)
+                temporary.flush()
+                document = ezdxf.readfile(temporary.name)
             entities = [e.dxf.handle for e in document.modelspace()]
         elif format == 'svg':
             if re.search(br'<!\s*(DOCTYPE|ENTITY)', content, re.I):

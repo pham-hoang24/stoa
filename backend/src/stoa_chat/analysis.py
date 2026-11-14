@@ -16,9 +16,12 @@ TARGETS = {'wall': ('wall', 'walls', 'seinä', 'seinää', 'seinien'),
 
 def question_kind(question):
     q = question.casefold()
-    for kind, pattern in [('volume', r'volume|tilavuu|m³'), ('area', r'area|pinta.ala|m²'),
-                          ('length', r'length|long|pitu|perimeter|ympärys'),
-                          ('count', r'how many|count|kuinka monta|montako|lukumäärä')]:
+    # Physical units outrank counts; counts outrank dimensional adjectives.
+    for kind, pattern in [
+        ('volume', r'volume|tilavuu|m³|cubic\s+met(?:re|er)s?'),
+        ('area', r'area|pinta.ala|m²|square\s+met(?:re|er)s?|neliömet'),
+        ('count', r'how many|count|kuinka monta|montako|lukumäärä'),
+        ('length', r'\b(?:length|long|width|wide|height|high|tall|distance|depth|deep|perimeter)\b|pitu|ympärys|levey|korkeu|etäisyy|syvyy')]:
         if re.search(pattern, q):
             return kind
     return 'text'

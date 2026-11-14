@@ -14,7 +14,17 @@ def preview(drawing, page=1):
         raise ValueError('Source page does not exist')
     format = drawing['format']
     if format in {'png', 'jpeg'}:
-        image = cv2.imdecode(np.frombuffer(drawing['path'].read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        image = cv2.imdecode(np.frombuffer(drawing['path'].read_bytes(), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        # UNCHANGED preserves the uploaded source frame (including JPEG EXIF),
+        # alpha and bit depth. Normalize before compositing on a white sheet.
+        if image is not None:
+            if image.dtype == np.uint16:
+                image = (image / 257).round().astype(np.uint8)
+            if image.ndim == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            elif image.shape[2] == 4:
+                alpha = image[:, :, 3:4].astype(np.float32) / 255
+                image = (image[:, :, :3] * alpha + 255 * (1 - alpha)).round().astype(np.uint8)
     elif format in {'pdf', 'svg'}:
         # SVG was validated during ingest. MuPDF rasterizes without browser scripts
         # or network resource resolution; uploaded SVG never enters the DOM.

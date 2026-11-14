@@ -189,7 +189,7 @@ def svg_facts(drawing):
                     'clip-path', 'mask', 'filter'}
     geometry_safe = not any(
         n.get('transform') or presentation.intersection(n.attrib)
-        or n.tag.split('}')[-1] in {'use', 'defs', 'symbol', 'mask', 'clipPath'}
+        or n.tag.split('}')[-1] in {'use', 'defs', 'symbol', 'mask', 'clipPath', 'line', 'polyline'}
         for n in root.iter())
     if not geometry_safe:
         return {'objects': [], 'facts': [], 'complete': False}

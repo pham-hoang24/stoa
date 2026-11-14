@@ -10,7 +10,7 @@
   background: #f6f7f3;
   font-synthesis: none;
   --green: #294d3c;
-  --muted: #707b74;
+  --muted: #59665d;
   --border: #dfe4db;
 }
 * {
@@ -437,7 +437,7 @@ textarea:focus {
   flex-direction: column;
   gap: 14px;
   font-size: 10px;
-  color: #8a9483;
+  color: #59665d;
   text-align: left;
   margin: 30px auto;
   max-width: 170px;
