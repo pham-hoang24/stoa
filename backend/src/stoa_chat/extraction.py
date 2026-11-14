@@ -60,18 +60,24 @@ def prior_answers(context):
         answer = message.get('answer', {})
         calculation = answer.get('calculation', {})
         value = answer.get('value')
+        target = answer.get('target')
+        status = answer.get('status')
+        review_status = answer.get('review_status')
         if set(message['drawing_ids']) != selected:
             contribution = next((c for c in answer.get('contributions', []) if c.get('drawing_id') in selected), None)
             if contribution is None:
                 continue
             value = contribution.get('value')
+            target = contribution.get('target')
+            status = contribution.get('status', status)
+            review_status = contribution.get('review_status', review_status)
             calculations = calculation.get('calculations', [])
             index = message['drawing_ids'].index(contribution['drawing_id'])
             calculation = calculations[index] if index < len(calculations) else {}
         summaries.append({
-            'drawing_ids': sorted(selected), 'status': answer.get('status'),
-            'review_status': answer.get('review_status'),
-            'target': str(answer.get('target') or '')[:500],
+            'drawing_ids': sorted(selected), 'status': status,
+            'review_status': review_status,
+            'target': str(target or '')[:500],
             'value': value[:1000] if isinstance(value, str) else value,
             'unit': answer.get('unit'),
             'facts': [{k: (v[:500] if isinstance(v, str) else v)

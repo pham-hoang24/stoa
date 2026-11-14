@@ -155,3 +155,28 @@ def test_quantity_intent_precedence_is_preserved(tmp_path,monkeypatch,question,k
         assert ask(base,path,drawing,question)['status']=='abstain'
 
         assert seen == [kind]
+
+
+def test_multi_drawing_followup_keeps_each_resolved_target_with_its_source(tmp_path,monkeypatch):
+    from stoa.lanes import llm
+    targets = {}
+    seen = {}
+    def controlled(messages,**kwargs):
+        payload=json.loads(messages[-1]['content'][0]['text'])
+        page=payload['pages'][0]
+        source=page['drawing_id']
+        if payload['kind']=='text':
+            return json.dumps({'operation':'text','complete':True,'target':targets[source], 'facts':[
+                {'kind':'text','value':targets[source],'page_ref':page['id'],'bbox':[0,0,3,3]}]})
+        seen[source] = payload['prior_answers'][-1]['target']
+        return json.dumps({'operation':'abstain','missing':'No printed perimeter'})
+    monkeypatch.setattr(llm,'chat',controlled)
+    with running(tmp_path) as base:
+        path,a=upload(base,'a.png',png())
+        _,b=upload(base,'b.svg',b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>',path)
+        targets.update({a['id']:'Sauna A',b['id']:'Sauna B'})
+        def multi(question):
+            return request(base,path+'/questions','POST',{'question':question,'drawing_ids':list(targets)})[1]['answer']
+        assert multi('Which room is largest?')['value']=='Sauna A\nSauna B'
+        assert multi('These are independent, what is its perimeter?')['status']=='abstain'
+        assert seen==targets

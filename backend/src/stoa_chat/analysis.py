@@ -133,7 +133,8 @@ class HybridAnswerer:
                       'evidence':[e for a in answers for e in a['evidence']],
                       'calculation':{'operation':'sum_contributions','calculations':[a.get('calculation') for a in answers]}}
         answer['independent_scope'] = confirmed
-        answer['contributions'] = [{'drawing_id':d['id'],'value':a['value'],'unit':a.get('unit')} for d,a in zip(drawings,answers)]
+        answer['contributions'] = [{'drawing_id':d['id'],'value':a['value'],'unit':a.get('unit'),
+                                    'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status')} for d,a in zip(drawings,answers)]
         sources = {d['id']:d for d in drawings}
         for ev in answer['evidence']:
             source = sources[ev['drawing_id']]
