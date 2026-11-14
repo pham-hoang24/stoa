@@ -10,7 +10,8 @@ Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, a
 - POST /api/chats/{chat_id}/questions JSON {question, drawing_ids?:[id]} → assistant message {id,role:'assistant',drawing_ids,answer}. Omitted drawing_ids inherits prior selected scope; first question must select explicitly. User and assistant messages persisted. Unknown/empty selections 400.
 - GET /api/chats/{chat_id}/assets/{drawing_id} → original source bytes, chat-scoped.
 - GET /api/chats/{chat_id}/evidence/{assistant_message_id}/{index} → evidence JSON, chat-scoped.
-- GET /api/chats/{chat_id}/previews/{drawing_id}/{page} → safe PNG with source mapping retained on evidence.
+- GET /api/chats/{chat_id}/previews/{drawing_id}/{page} → safe PNG with source mapping retained on evidence. For IFC/DXF this is a plan view drawn from entity geometry (frame: source XY with y negated; DXF modelspace units, IFC world metres).
+- GET /api/chats/{chat_id}/previews/{drawing_id} → IFC/DXF plan index: 202 {status:'pending'} while geometry is computed in the background (first request starts it; cached on disk under `native_previews/<sha256>-v<N>/`), then 200 {status:'ready', layout:'modelspace'|'storeys'|'whole_model', pages:[{page,label,width,height,origin,units,pixel_width,pixel_height}], entities:{entity_id:[page,x0,y0,x1,y1]}} or 200 {status:'unavailable', reason} when the file has no drawable geometry or the element cap / time budget is hit. Native answer evidence for drawn entities gains page, bbox, preview_url and source_* fields from this index (storeys get their page only); entities without geometry keep only their id. IFC/DXF drawing `pages` stay empty.
 - Errors JSON {error: readable string}, 400/403/404/413.
 
 Injected `answerer(context: dict) -> dict` is synchronous. Context: question, drawing_ids, messages (prior messages only), drawings (selected drawing metadata plus backend-private pathlib Path in `path`). Paths never sent over HTTP. Each drawing's pages has page (one-based), width,height,units where available. Metadata format lowercase png/jpeg/pdf/ifc/dxf/svg.
@@ -96,6 +97,13 @@ PNG/JPEG questions use one full view of up to 3,000 pixels per side (the model
 downsamples internally, so more pixels do not help). Only count questions on images
 larger than 3,000 pixels use a contextual overview and lossless 1,400-pixel crops from
 the normalized original, with 20% overlap.
+Count questions on images whose longest side is under 1,600 pixels are enlarged
+(cubic, at most 6x) to about 2,600 pixels and read as overlapping 1,400-pixel tiles,
+each sent as its own one-image request with short drawing conventions for the asked
+object (windows, doors, stairs; English or Finnish wording). Python keeps each
+detection only in the tile whose core holds its centre, counts a detection seen by two
+tiles once, and leaves out (and reports) boxes far larger than the other counted
+objects; one unreadable tile abstains (`image_processing.method` `enlarged_tiles`).
 Each crop has a source transform and a nonoverlapping ownership core. Counts must
 cite complete objects in the owning detail view; the overview cannot supply count
 facts. Clipped regions, missing coverage and conflicting overlap detections cannot
@@ -115,7 +123,8 @@ successful extraction processing, not independently verified detection accuracy.
 Initial bounds are 64 detail crops and 3,000 aggregate count detections. Exceeding a
 bound abstains explicitly;
 no crops or detections are silently omitted. Geometry and calibration from different
-views are converted to the original source frame before calculation. Smaller raster
-uploads keep their existing single-view path. PDF/SVG rendering and IFC behavior are
+views are converted to the original source frame before calculation. Other questions
+on smaller rasters, and counts on rasters of 1,600 to 3,000 pixels, keep the single-view
+path. PDF/SVG rendering and IFC behavior are
 unchanged in this milestone. OCR is delegated separately in issue #58; this milestone
 does not require or automatically run an OCR engine.

@@ -1,6 +1,6 @@
 """Bounded detail requests and conservative count reconciliation in source pixels."""
 from .answers import abstain
-from .render import raster_views, TILE_SIDE, TILE_OVERLAP
+from .render import raster_views, TILE_SIDE, TILE_OVERLAP, MAX_UPSCALE, COUNT_TILED_SIDE
 
 
 DETAILS_PER_BATCH = 3
@@ -58,9 +58,106 @@ def merged_ocr(answers):
     return {'ocr':{'engine':'tesseract','review_status':'unreviewed','views':list(views.values())}} if views else {}
 
 
-def extract_details(context,catalogs,kind,extractor):
+def same_object(a,b):
+    """Two source boxes cite one object when each centre lies within the other box grown by half its size."""
+    def inside(box,other):
+        cx,cy=(box[0]+box[2])/2,(box[1]+box[3])/2
+        w,h=other[2]-other[0],other[3]-other[1]
+        return other[0]-w/2<=cx<=other[2]+w/2 and other[1]-h/2<=cy<=other[3]+h/2
+    return inside(a,b) and inside(b,a)
+
+
+def out_of_scale(boxes):
+    """Indices of boxes far larger than the typical counted object (a room or coloured area
+    boxed as a window); judged only when there are enough boxes to know what typical is."""
+    if len(boxes)<SCALE_MIN_BOXES:
+        return set()
+    areas=[(b[2]-b[0])*(b[3]-b[1]) for b in boxes]
+    median=sorted(areas)[len(areas)//2]
+    return {i for i,a in enumerate(areas) if a>MAX_AREA_RATIO*median}
+
+
+SCALE_MIN_BOXES=5
+MAX_AREA_RATIO=20
+
+
+def extract_small_count(context,catalogs,kind,extractor):
+    """Count on a small raster from independent readings of overlapping enlarged tiles.
+
+    Asked about the whole small sheet, the model guesses positions from the room layout; asked
+    about one enlarged tile at a time it boxes the drawn symbols. Each tile is a plain one-view
+    request, so the model never handles ownership rules: Python keeps a detection only in the
+    tile whose core holds its centre and removes cross-tile duplicates. Any tile that cannot be
+    read makes the whole count abstain."""
+    from concurrent.futures import ThreadPoolExecutor
+    drawing=context['drawings'][0]
+    side=max(drawing['pages'][0]['width'],drawing['pages'][0]['height'])
+    scale=min(MAX_UPSCALE,COUNT_TILED_SIDE/side)
     try:
-        views=raster_views(context['drawings'][0])
+        views=raster_views(drawing,scale=scale)
+    except (ValueError,RuntimeError) as exc:
+        return abstain(str(exc),'image_detail_scope')
+    tiles=views[1:] or views
+    hidden={'role','core_bbox','source_bbox'}
+    plain=[(png,{**{k:v for k,v in d.items() if k not in hidden},'role':'page'}) for png,d in tiles]
+    processing={'method':'enlarged_tiles','version':1,'scale':round(scale,3),'tile_side':TILE_SIDE,'overlap':TILE_OVERLAP,
+                'required_views':[d['id'] for _,d in plain],'completed_views':[],
+                'regions':[{'id':d['id'],'source_bbox':d.get('source_bbox',[0,0,d['source_width'],d['source_height']])} for _,d in tiles]}
+
+    def read(view):
+        answer=extractor(context,catalogs,kind,_views=[view],_region=True)
+        if answer.get('error')=='invalid_extraction':
+            processing.setdefault('retried_views',[]).append(view[1]['id'])
+            answer=extractor(context,catalogs,kind,_views=[view],_region=True)
+        return answer
+    with ThreadPoolExecutor(min(4,len(plain))) as pool:
+        answers=list(pool.map(read,plain))
+    # One reading keeps its exact provenance (including any provider fallback); several are aggregated per view.
+    extra=lambda:{'image_processing':processing,**merged_ocr(answers),
+                  'model_provenance':answers[0].get('model_provenance',{}) if len(answers)==1 else provenance(answers)}
+    for (_,d),answer in zip(plain,answers):
+        if answer['status'] in {'abstain','clarification'}:
+            return {**answer,'explanation':'Could not read every enlarged image region. '+answer['explanation'],**extra()}
+        processing['completed_views'].append(d['id'])
+    bases={a['calculation']['count_basis'] for a in answers if a['calculation']['facts']}
+    if len(bases)>1:
+        return {**abstain('Image regions mixed object counts and text-marker counts; the counting basis needs review.','image_reconciliation_failed'),**extra()}
+    facts,evidence,owners,duplicates=[],[],[],0
+    for tile,((_,d),answer) in enumerate(zip(tiles,answers)):
+        sx,_,_,sy,ox,oy=d['transform']
+        core=d.get('core_bbox',[0,0,d['width'],d['height']])
+        for fact,ev in zip(answer['calculation']['facts'],answer['evidence']):
+            b=ev['bbox'];cx,cy=((b[0]+b[2])/2-ox)/sx,((b[1]+b[3])/2-oy)/sy
+            if not (core[0]<=cx<core[2] and core[1]<=cy<core[3]):
+                continue   # its owning neighbour reports it
+            if any(owner!=tile and same_object(b,prior['bbox']) for owner,prior in zip(owners,evidence)):
+                duplicates+=1;continue
+            facts.append(fact);evidence.append(ev);owners.append(tile)
+    oversized=out_of_scale([e['bbox'] for e in evidence])
+    if oversized:
+        facts=[f for i,f in enumerate(facts) if i not in oversized]
+        evidence=[e for i,e in enumerate(evidence) if i not in oversized]
+    processing.update(duplicates_removed=duplicates,oversized_removed=len(oversized),
+                      readings=[a['value'] for a in answers])
+    basis=next(iter(bases)) if bases else 'objects'
+    explanation=(f'Counted from cited detections in {len(tiles)} overlapping enlarged region(s) of the image, each read separately; '
+                 'every object is counted in the one region that owns its centre. Visual interpretation remains unreviewed.')
+    if duplicates:explanation+=f' {duplicates} detection(s) seen in two regions were counted once.'
+    if oversized:explanation+=(f' {len(oversized)} region(s) far larger than the other counted objects were left out as not being one of them; '
+                               'check them before relying on the total.')
+    if basis=='text_markers':explanation+=' The label count assumes one marker per object; verify that assumption.'
+    if not evidence:
+        evidence=[e for a in answers for e in a['evidence'] if 'coverage' in e]
+    return {**answers[0],'status':'estimate' if any(a['status']=='estimate' for a in answers) else 'proposal',
+            'value':len(facts),'evidence':evidence,'explanation':explanation,
+            'calculation':{'operation':'count','facts':facts,'count_basis':basis,'duplicates_removed':duplicates,
+                           **({'oversized_removed':len(oversized)} if oversized else {})},
+            'contributions':[{'drawing_id':drawing['id'],'evidence_count':len(evidence)}],**extra()}
+
+
+def extract_details(context,catalogs,kind,extractor,scale=1):
+    try:
+        views=raster_views(context['drawings'][0],scale=scale)
     except (ValueError,RuntimeError) as exc:
         return abstain(str(exc),'image_detail_scope')
     overview,details=views[0],views[1:]

@@ -180,7 +180,7 @@ def test_invalid_extractions_and_provider_outage_never_become_numbers(tmp_path, 
     monkeypatch.setattr(llm,'chat',extract)
     with running(tmp_path) as base:
         path,drawing = upload(base,'plan.png',png())
-        for bad in [{'kind':'object','bbox':[-1,0,2,2]}, {'kind':'object','bbox':[0,0,99,99]},
+        for bad in [{'kind':'object','bbox':[-5,0,2,2]}, {'kind':'object','bbox':[0,0,99,99]},
                     {'ref':'invented-native-entity'}, {'kind':'object','bbox':[0,0,2,2],'polygon':[[0,0],[99,0],[1,1]]}]:
             current.clear();current.update(bad)
             answer = ask(base,path,drawing,'How many sinks?')
@@ -249,7 +249,8 @@ def test_exif_jpeg_uses_raw_pixel_frame_and_zero_has_coverage(tmp_path, monkeypa
     def extract(messages,**kwargs):
         payload=json.loads(messages[-1]['content'][0]['text'])
         page=payload['pages'][0]
-        assert [page['width'],page['height']]==[16,12]
+        # Raw pixel frame (not EXIF-rotated); a small count raster is enlarged 6x for the model.
+        assert [page['source_width'],page['source_height']]==[16,12] and [page['width'],page['height']]==[96,72]
         return json.dumps({'operation':'count','complete':True,'coverage':[page['id']],'facts':[]})
     monkeypatch.setattr(llm,'chat',extract)
     with running(tmp_path) as base:

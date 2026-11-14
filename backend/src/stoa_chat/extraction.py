@@ -3,7 +3,7 @@ import json
 import math
 import re
 from .answers import abstain
-from .render import preview, MAX_PAGES, SINGLE_VIEW_MAX_SIDE
+from .render import preview, MAX_PAGES, SINGLE_VIEW_MAX_SIDE, COUNT_MIN_SIDE
 from . import ocr_views
 
 
@@ -47,6 +47,38 @@ RULES
 - OCR words (payload "ocr", boxes in that view's pixels) are unreviewed hints: confirm them against the image and copy literal text. Empty or missing OCR never means something is absent.
 - Prior answers are conversational context with their original review status; cite fresh evidence from the current sources.
 - Read any language (English, Finnish, German, ...); object vocabulary is open.'''
+
+
+# Short drawing conventions for commonly counted plan symbols, chosen from the question
+# (English and Finnish stems). They tell the model what the symbol looks like; they never
+# carry counts or positions.
+CONVENTIONS = [
+    (r'\bwindows?\b|\bikkun', 'A window symbol is a narrow rectangle of two or three thin parallel lines set into '
+     'the outer wall line, often lightly filled and slightly wider than the wall, about as long as a door is wide. '
+     'Windows occur only on the outer edges of each floor outline. Box only the symbol itself, never a whole wall, '
+     'room or coloured area. A window with several panes is one window.'),
+    (r'\bdoors?\b|\bov(?:i|ea|et|en|ia|ien|issa|eton|ella)\b', 'A door is a door leaf in a wall opening, usually a '
+     'straight line with a quarter-circle swing arc; a sliding door is drawn as offset parallel lines in the opening. '
+     'An opening without a leaf is not a door. Give each door one box around its leaf and arc.'),
+    (r'\bstair|\bportai|\bportaa|\bporra', 'A staircase is a run of parallel treads, often with a walking-line arrow, '
+     'or a spiral. Count each staircase once, never each tread.'),
+]
+SHEET_CONVENTION = ('One sheet may show several floors or buildings side by side; inspect all of them, '
+                    'including every edge of each outline.')
+
+
+REGION_NOTE = ('This image is one enlarged region of a larger drawing. The other regions are read separately and '
+               'combined by Python, so this region is the complete scope of this request: box every requested object '
+               'visible in it, including near its edges, set complete true after inspecting it, and do not abstain '
+               'because the rest of the drawing is not shown.')
+
+
+def conventions(question, kind, region=False):
+    """Drawing-convention hints for count questions; empty for other kinds."""
+    if kind != 'count':
+        return []
+    q = str(question).casefold()
+    return [text for pattern, text in CONVENTIONS if re.search(pattern, q)] + [REGION_NOTE if region else SHEET_CONVENTION]
 
 
 def finite(value):
@@ -194,6 +226,12 @@ def raster_single(drawing, kind):
     return kind != 'count' or side <= SINGLE_VIEW_MAX_SIDE
 
 
+def small_raster_count(drawing, kind):
+    """A count on a one-page raster small enough that it is enlarged and read twice."""
+    return (kind == 'count' and drawing.get('format') in {'png', 'jpeg'} and len(drawing['pages']) == 1
+            and max(drawing['pages'][0]['width'], drawing['pages'][0]['height']) < COUNT_MIN_SIDE)
+
+
 def provider_reason(exc):
     from stoa.lanes import llm
     message = str(exc)
@@ -206,12 +244,15 @@ def provider_reason(exc):
     return 'Provider unavailable; retry or check local configuration.'
 
 
-def extract(context, catalogs, kind, *, _views=None):
+def extract(context, catalogs, kind, *, _views=None, _region=False):
     from stoa.lanes import llm
     single = None
     if _views is None and len(context['drawings']) == 1:
         drawing = context['drawings'][0]
         if drawing.get('format') in {'png', 'jpeg'}:
+            if small_raster_count(drawing, kind):
+                from .image_analysis import extract_small_count
+                return extract_small_count(context, catalogs, kind, extract)
             if raster_single(drawing, kind):
                 single = SINGLE_VIEW_MAX_SIDE
             elif any(max(p['width'], p['height']) > 1600 for p in drawing['pages']):
@@ -249,7 +290,9 @@ def extract(context, catalogs, kind, *, _views=None):
             if not data['complete'] or not drawing['entity_ids']:
                 return abstain('No complete inspectable native inventory or rendered source is available.')
             required_coverage.append(drawing['id'] + ':native')
+    hints = conventions(context['question'], kind, _region)
     payload = {'question': context['question'], 'kind': kind,
+               **({'drawing_conventions': hints} if hints else {}),
                'prior_answers': prior_answers(context),
                'prior_questions': [m['question'] for m in context['messages'][-8:] if m['role'] == 'user'],
                **({'ocr': ocr_views.prompt_block(ocr_records)} if ocr_records else {}),
@@ -438,6 +481,35 @@ def uniform_boxes(boxes):
     return max(sum(same(a, b) for b in sizes) for a in sizes) >= .8 * len(sizes)
 
 
+def lattice(boxes):
+    """True when equal-sized boxes fill a regular two-dimensional lattice (at least 2x2 cells).
+
+    Observed on small plans: four or six identical boxes at (100, 100), (150, 100), (100, 300),
+    (150, 300) ... in normalized units, placed inside rooms. Real objects along a wall share one
+    row, and two facing walls give columns, but their boxes then differ in size or spacing."""
+    if len(boxes) < 4:
+        return False
+    def close(a, b, size):
+        return abs(a - b) <= max(.5, .02 * size)
+    sizes = [(b[2] - b[0], b[3] - b[1]) for b in boxes]
+    for w, h in sizes:
+        group = [b for b, (bw, bh) in zip(boxes, sizes) if close(bw, w, w) and close(bh, h, h)]
+        if len(group) < 4:
+            continue
+        def lines(values, size):
+            # Positions shared by at least two boxes of the group.
+            return sorted({v for v in values if sum(close(v, o, size) for o in values) >= 2})
+        xs, ys = lines([b[0] for b in group], w), lines([b[1] for b in group], h)
+        cols = [x for i, x in enumerate(xs) if i == 0 or not close(x, xs[i - 1], w)]
+        rows = [y for i, y in enumerate(ys) if i == 0 or not close(y, ys[i - 1], h)]
+        if len(cols) < 2 or len(rows) < 2:
+            continue
+        cells = sum(any(close(b[0], x, w) and close(b[1], y, h) for b in group) for x in cols for y in rows)
+        if cells == len(cols) * len(rows) and cells >= max(4, .5 * len(boxes)):
+            return True
+    return False
+
+
 def repeated_grid(boxes):
     """True when most boxes form one long chain of equal-sized, abutting tiles: a generation loop.
 
@@ -553,6 +625,12 @@ def calculate(plan, pages, native, kind, drawings, required_coverage):
     if not isinstance(plan.get('facts', []), list) or len(plan.get('facts', [])) > 1000:
         raise ValueError('Extraction exceeds fact bound')
     lenient = operation in {'answer', 'text'}  # dropping one bad citation cannot change a quantity here
+    # Models declare coordinate_space on the first facts and then omit it; when every declared
+    # space in the reply agrees, an omitted one means the same space, not raw pixels.
+    declared = {f.get('coordinate_space') for f in plan.get('facts', []) if isinstance(f, dict) and 'coordinate_space' in f}
+    if len(declared) == 1 and isinstance(plan.get('facts'), list):
+        plan['facts'] = [{'coordinate_space': next(iter(declared)), **f} if isinstance(f, dict) and 'bbox' in f else f
+                         for f in plan['facts']]
     seen = set()
     for supplied in plan.get('facts', []):
         try:
@@ -591,7 +669,7 @@ def calculate(plan, pages, native, kind, drawings, required_coverage):
         if not required_coverage:
             raise ValueError('Count requires complete page coverage')
         boxes = [e['bbox'] for e in evidence if 'bbox' in e]
-        if repeated_grid(boxes) or (count_basis == 'objects' and uniform_boxes(boxes)):
+        if repeated_grid(boxes) or (count_basis == 'objects' and (uniform_boxes(boxes) or lattice(boxes))):
             raise ValueError('Count regions repeat a grid pattern')
         value, unit = len(facts), 'count'
         if not evidence:

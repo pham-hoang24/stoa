@@ -342,16 +342,16 @@ def test_ocr_snap_needs_the_label_number_and_folds_accents(tmp_path, monkeypatch
 
 
 def test_count_boxes_on_blank_paper_are_rejected(tmp_path, monkeypatch):
-    d = drawing(tmp_path)
+    d = drawing(tmp_path, 1600, 1200)   # large enough for the single-view count path
     path = d['path']
-    image = np.full((600, 800, 3), 255, np.uint8)
-    for x in range(50, 750, 100):
-        cv2.rectangle(image, (x, 50), (x + 40, 90), (0, 0, 0), 3)   # seven drawn doors along the top
+    image = np.full((1200, 1600, 3), 255, np.uint8)
+    for x in range(100, 1500, 200):
+        cv2.rectangle(image, (x, 100), (x + 80, 180), (0, 0, 0), 6)   # seven drawn doors along the top
     path.write_bytes(cv2.imencode('.png', image)[1].tobytes())
     def respond(messages, **kw):
         p = page_of(messages)
-        drawn = [[x - i, 50 - i, x + 40 + i, 90] for i, x in enumerate(range(50, 750, 100))]
-        empty = [[x, 400, x + 30 + 5 * i, 440] for i, x in enumerate(range(50, 450, 100))]   # four boxes on empty paper
+        drawn = [[x - i, 100 - i, x + 80 + i, 180] for i, x in enumerate(range(100, 1500, 200))]
+        empty = [[x, 800, x + 60 + 10 * i, 880] for i, x in enumerate(range(100, 900, 200))]   # four boxes on empty paper
         return json.dumps({'operation': 'count', 'complete': True, 'facts': [
             {'page_ref': p['id'], 'bbox': b, 'kind': 'object', 'label': f'door {i}'} for i, b in enumerate(drawn + empty)]})
     answer = ask(d, 'How many doors are there?', respond, monkeypatch)
@@ -359,7 +359,8 @@ def test_count_boxes_on_blank_paper_are_rejected(tmp_path, monkeypatch):
     def honest(messages, **kw):
         p = page_of(messages)
         return json.dumps({'operation': 'count', 'complete': True, 'facts': [
-            {'page_ref': p['id'], 'bbox': [x - 2, 48, x + 42, 92], 'kind': 'object', 'label': f'door {x}'} for x in range(50, 750, 100)]})
+            {'page_ref': p['id'], 'bbox': [x - 4, 96, x + 84 + i, 184], 'kind': 'object', 'label': f'door {x}'}
+            for i, x in enumerate(range(100, 1500, 200))]})
     assert ask(d, 'How many doors are there?', honest, monkeypatch)['value'] == 7
 
 
@@ -389,3 +390,151 @@ def test_ocr_snap_spans_a_wide_gap_on_one_line(tmp_path, monkeypatch):
                                            'printed_text': 'Massstab 1:200 (A3)'}], '1:200'))
     ev = ask(drawing(tmp_path), 'What is the scale?', respond, monkeypatch)['evidence'][0]
     assert ev['bbox'] == [400, 300, 630, 313] and ev['bbox_source'] == 'ocr'
+
+
+# ---------- small raster counts: enlarged tiles, conventions, fabricated lattices ----------
+
+def small_plan(tmp_path, objects, width=482, height=507):
+    """A small white raster with a drawn black box at each source-pixel object."""
+    d = drawing(tmp_path, width, height)
+    image = np.full((height, width, 3), 255, np.uint8)
+    for x0, y0, x1, y1 in objects:
+        cv2.rectangle(image, (x0, y0), (x1, y1), (0, 0, 0), 1)
+    d['path'].write_bytes(cv2.imencode('.png', image)[1].tobytes())
+    return d
+
+
+def tile_reply(objects, label='window'):
+    """A fake model that boxes, in normalized view units, every object wholly inside its tile."""
+    def respond(messages, **kw):
+        page = page_of(messages)
+        sx, _, _, sy, ox, oy = page['transform']
+        facts = []
+        for i, (x0, y0, x1, y1) in enumerate(objects):
+            v = [(x0 - ox) / sx, (y0 - oy) / sy, (x1 - ox) / sx, (y1 - oy) / sy]
+            if v[0] >= 0 and v[1] >= 0 and v[2] <= page['width'] and v[3] <= page['height']:
+                facts.append({'page_ref': page['id'], 'coordinate_space': 'normalized_1000', 'kind': 'object',
+                              'label': f'{label} {i}', 'bbox': [v[0] / page['width'] * 1000, v[1] / page['height'] * 1000,
+                                                                v[2] / page['width'] * 1000, v[3] / page['height'] * 1000]})
+        return json.dumps({'operation': 'count', 'complete': True, 'facts': facts})
+    return respond
+
+
+def test_small_raster_count_reads_enlarged_tiles_and_counts_overlap_once(tmp_path, monkeypatch):
+    # The middle window lies in the overlap of all four tiles; each tile reports it.
+    windows = [(20, 30, 50, 36), (230, 240, 260, 246), (440, 470, 470, 476)]
+    seen = []
+    reply = tile_reply(windows)
+    def respond(messages, **kw):
+        payload = json.loads(messages[1]['content'][0]['text'])
+        seen.append(payload)
+        assert sum(c['type'] == 'image_url' for c in messages[1]['content']) == 1
+        return reply(messages, **kw)
+    answer = ask(small_plan(tmp_path, windows), 'Kuinka monta ikkunaa pohjapiirustuksessa on?', respond, monkeypatch)
+    assert answer['status'] == 'proposal' and answer['value'] == 3
+    assert sorted(e['bbox'] for e in answer['evidence']) == [pytest.approx(list(w), abs=.01) for w in windows]
+    processing = answer['image_processing']
+    assert processing['method'] == 'enlarged_tiles' and processing['duplicates_removed'] == 0
+    assert processing['completed_views'] == processing['required_views'] and len(seen) == len(processing['required_views']) > 1
+    for payload in seen:
+        page = payload['pages'][0]
+        assert page['width'] <= 1400 and page['transform'][0] < .5   # enlarged several times
+        assert 'core_bbox' not in page and page['role'] == 'page'      # ownership stays in Python
+        hints = ' '.join(payload['drawing_conventions'])
+        assert 'window symbol' in hints and 'one enlarged region' in hints
+
+
+def test_detection_split_across_tile_cores_is_counted_once(tmp_path, monkeypatch):
+    door = (232, 100, 252, 120)
+    d = small_plan(tmp_path, [door])
+    calls = []
+    def respond(messages, **kw):
+        page = page_of(messages)
+        calls.append(page['id'])
+        sx, _, _, sy, ox, oy = page['transform']
+        # Each tile's box is shifted a little, so the two centres fall in different cores.
+        shift = -6 if page['transform'][4] == 0 else 6
+        x0, y0, x1, y1 = door[0] + shift, door[1], door[2] + shift, door[3]
+        v = [(x0 - ox) / sx, (y0 - oy) / sy, (x1 - ox) / sx, (y1 - oy) / sy]
+        facts = [] if v[0] < 0 or v[2] > page['width'] or v[1] < 0 or v[3] > page['height'] else [
+            {'page_ref': page['id'], 'kind': 'object', 'label': 'door', 'bbox': v}]
+        return json.dumps({'operation': 'count', 'complete': True, 'facts': facts})
+    answer = ask(d, 'How many doors are there?', respond, monkeypatch)
+    assert answer['value'] == 1 and answer['image_processing']['duplicates_removed'] == 1
+
+
+def test_one_unreadable_tile_makes_the_small_count_abstain(tmp_path, monkeypatch):
+    windows = [(20, 30, 50, 36)]
+    reply = tile_reply(windows)
+    def respond(messages, **kw):
+        if page_of(messages)['transform'][4] > 0:   # every tile right of the first column
+            return json.dumps({'operation': 'abstain', 'missing': 'The region is too blurred to identify any window symbols reliably.'})
+        return reply(messages, **kw)
+    answer = ask(small_plan(tmp_path, windows), 'How many windows are there?', respond, monkeypatch)
+    assert answer['status'] == 'abstain' and answer['value'] is None
+    assert answer['explanation'].startswith('Could not read every enlarged image region.')
+
+
+def test_boxes_far_larger_than_the_counted_objects_are_left_out_and_reported(tmp_path, monkeypatch):
+    windows = [(20 + 40 * i, 30, 45 + 40 * i, 36 + i) for i in range(5)] + [(40, 150, 140, 210)]   # last: a whole room
+    answer = ask(small_plan(tmp_path, windows), 'How many windows are there?', tile_reply(windows), monkeypatch)
+    assert answer['value'] == 5 and answer['calculation']['oversized_removed'] == 1
+    assert 'far larger' in answer['explanation']
+
+
+def test_large_rasters_keep_the_single_view_count_path(tmp_path, monkeypatch):
+    def respond(messages, **kw):
+        page = page_of(messages)
+        assert page['width'] == 2000 and 'role' not in page
+        payload = json.loads(messages[1]['content'][0]['text'])
+        assert payload['drawing_conventions'][-1].startswith('One sheet may show several floors')
+        return json.dumps({'operation': 'count', 'complete': True, 'facts': []})
+    answer = ask(drawing(tmp_path, 2000, 1500), 'How many doors are there?', respond, monkeypatch)
+    assert answer['value'] == 0 and 'image_processing' not in answer
+
+
+def test_enlarged_raster_views_map_back_to_source_pixels(tmp_path):
+    from stoa_chat.render import raster_views
+    views = raster_views(drawing(tmp_path, 400, 300), scale=4.5)
+    assert len(views) == 1 + 2   # 1800x1350 enlargement: two columns, one row
+    for png, d in views[1:]:
+        sx, _, _, sy, ox, oy = d['transform']
+        assert d['width'] * sx + ox == pytest.approx(d['source_bbox'][2])
+        assert sx == pytest.approx(1 / 4.5) and ox == pytest.approx(d['source_bbox'][0])
+
+
+@pytest.mark.parametrize('question,expected', [
+    ('How many windows are there?', 'window symbol'), ('Kuinka monta ikkunaa pohjapiirustuksessa on?', 'window symbol'),
+    ('How many doors?', 'door leaf'), ('Montako ovea asunnossa on?', 'door leaf'), ('Kuinka monta portaikkoa?', 'staircase')])
+def test_drawing_conventions_follow_the_question(question, expected):
+    from stoa_chat.extraction import conventions
+    hints = conventions(question, 'count')
+    assert any(expected in h for h in hints) and len(hints) == 2
+    assert conventions('How many sinks?', 'count') == [hints[-1]]   # only the whole-sheet reminder
+    assert conventions('Where is the door?', 'text') == []
+
+
+def test_fabricated_lattice_of_equal_boxes_is_not_a_count():
+    from stoa_chat.extraction import lattice
+    # Observed: identical boxes at round normalized positions in a 2x2 / 3x2 lattice inside rooms.
+    assert lattice([[48.2, 50.7, 72.3, 60.8], [192.8, 50.7, 216.9, 60.8], [48.2, 152.1, 72.3, 162.2], [192.8, 152.1, 216.9, 162.2]])
+    assert lattice([[x, y, x + 24.1, y + 10.1] for x in (48.2, 96.4, 144.6) for y in (50.7, 152.1)])
+    # Real windows along one facade: one row, even when evenly spaced and equal.
+    assert not lattice([[100 + 60 * i, 20, 130 + 60 * i, 26] for i in range(6)])
+    # Two facing walls with windows at matching heights, but boxes that actually differ.
+    facing = [[20, 100, 26, 131], [20, 200, 26, 233], [400, 101, 405, 130], [400, 199, 406, 232]]
+    assert not lattice(facing)
+    plan = {'operation': 'count', 'complete': True, 'facts': [
+        {'page_ref': 'd:1', 'bbox': [x, y, x + 24, y + 10], 'kind': 'object', 'label': 'window'} for x in (50, 200) for y in (50, 150)]}
+    with pytest.raises(ValueError, match='grid'):
+        calculate(plan, {'d:1': PAGE}, {}, 'count', D, ['d:1'])
+
+
+def test_omitted_coordinate_space_follows_the_declared_one():
+    facts = [{'page_ref': 'd:1', 'coordinate_space': 'normalized_1000', 'bbox': [100, 100, 120, 140], 'kind': 'object', 'label': 'a'},
+             {'page_ref': 'd:1', 'bbox': [500, 400, 520, 440], 'kind': 'object', 'label': 'b'}]
+    answer = calculate({'operation': 'count', 'complete': True, 'facts': facts}, {'d:1': PAGE}, {}, 'count', D, ['d:1'])
+    assert [e['bbox'] for e in answer['evidence']] == [[100, 50, 120, 70], [500, 200, 520, 220]]
+    mixed = [facts[0], {**facts[1], 'coordinate_space': 'preview_pixels'}, {**facts[1], 'bbox': [1, 1, 5, 5]}]
+    answer = calculate({'operation': 'count', 'complete': True, 'facts': mixed}, {'d:1': PAGE}, {}, 'count', D, ['d:1'])
+    assert answer['evidence'][2]['bbox'] == [1, 1, 5, 5]   # disagreeing declarations: omitted stays pixels

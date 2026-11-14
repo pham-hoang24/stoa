@@ -9,6 +9,14 @@ MAX_PAGES = 12
 # One full view for raster questions. The model downsamples internally (about 3.4k prompt
 # tokens for both 2480- and 3000-pixel sheets), so sending more pixels buys nothing.
 SINGLE_VIEW_MAX_SIDE = 3000
+# Count questions on rasters smaller than COUNT_MIN_SIDE: windows and doors in a 500-pixel plan
+# are a few pixels thick, and asked about the whole sheet the model guesses positions from the
+# layout. The sheet is enlarged (cubic, at most MAX_UPSCALE times) to about COUNT_TILED_SIDE and
+# read as overlapping TILE_SIDE crops (up to 3x3; 2600 measured better than 2400 or 3000 on
+# small CubiCasa plans); transforms still map to source pixels.
+COUNT_MIN_SIDE = 1600
+COUNT_TILED_SIDE = 2600
+MAX_UPSCALE = 6
 
 
 def raster_image(drawing):
@@ -90,12 +98,17 @@ def tile_axes(length):
     return [i*stride for i in range(max(1,math.ceil((length-TILE_SIDE)/stride)+1))]
 
 
-def raster_views(drawing, page=1):
-    """Overview plus lossless source-pixel crops with nonoverlapping ownership cores."""
+def raster_views(drawing, page=1, scale=1):
+    """Overview plus lossless source-pixel crops with nonoverlapping ownership cores.
+
+    scale > 1 first enlarges a small raster (cubic) so its symbols span enough pixels; crops
+    are then cut from the enlargement and the transforms still map to source pixels."""
     if drawing['format'] not in {'png','jpeg'}:
         raise ValueError('Detailed raster views require a PNG or JPEG upload')
     metadata=next(p for p in drawing['pages'] if p['page']==page)
     image=raster_image(drawing)
+    if scale>1:
+        image=cv2.resize(image,(round(image.shape[1]*scale),round(image.shape[0]*scale)),interpolation=cv2.INTER_CUBIC)
     height,width=image.shape[:2]
     tiled=max(width,height)>MAX_SIDE
     xs,ys=tile_axes(width),tile_axes(height)
