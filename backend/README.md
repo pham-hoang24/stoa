@@ -78,3 +78,27 @@ multiple drawings retain their individual query scopes. Empty typed inventories
 abstain: absence of IfcDoor occurrences does not prove the physical absence of doors.
 Missing GlobalIds cannot silently reduce a complete count. Native scope errors
 suggest narrowing elements rather than selecting nonexistent IFC pages.
+
+PNG/JPEG uploads larger than 1,600 pixels on either axis use a contextual overview
+and lossless 1,400-pixel crops from the normalized original, with 20% overlap.
+Each crop has a source transform and a nonoverlapping ownership core. Counts must
+cite complete objects in the owning detail view; the overview cannot supply count
+facts. Clipped regions, missing coverage and conflicting overlap detections cannot
+produce a total. Near-identical matching detections across views are reconciled in
+source coordinates; repeated labels at different positions remain distinct.
+
+Count requests inspect every required crop in sequential batches of at most three
+crops plus the overview. Each batch retains the existing correction, timeout-only
+fallback and shared process cap. An exhausted cap or failed batch stops the total.
+`image_processing` records required/completed region IDs, source bounds and duplicate
+reconciliation; `model_provenance.per_batch` retains actual provider/cache/fallback
+metadata. The chat displays completed versus required image regions. Coverage records
+successful extraction processing, not independently verified detection accuracy.
+
+Initial bounds are 64 detail crops, 3,000 aggregate count detections, and 12 detail
+crops jointly for text/measurement questions. Exceeding a bound abstains explicitly;
+no crops or detections are silently omitted. Geometry and calibration from different
+views are converted to the original source frame before calculation. Smaller raster
+uploads keep their existing single-view path. PDF/SVG rendering and IFC behavior are
+unchanged in this milestone. OCR is delegated separately in issue #58; this milestone
+does not require or automatically run an OCR engine.

@@ -151,11 +151,17 @@ class HybridAnswerer:
         answer['contributions'] = [{'drawing_id':d['id'],'value':a['value'],'unit':a.get('unit'),
                                     'target':a.get('target'),'status':a['status'],'review_status':a.get('review_status'),
                                     **({'model_provenance':a['model_provenance']} if a.get('model_provenance') else {}),
-                                    **({'native_query':a['native_query']} if a.get('native_query') else {})}
+                                    **({'native_query':a['native_query']} if a.get('native_query') else {}),
+                                    **({'image_processing':a['image_processing']} if a.get('image_processing') else {})}
                                    for d,a in zip(drawings,answers)]
         if len(answers)>1 and any(a.get('native_query') for a in answers):
             answer['native_query'] = {'scope':'independent_drawings','per_drawing':[
                 {'drawing_id':d['id'],**a['native_query']} for d,a in zip(drawings,answers) if a.get('native_query')]}
+        if len(answers)>1 and any(a.get('image_processing') for a in answers):
+            processing=[{'drawing_id':d['id'],**a['image_processing']} for d,a in zip(drawings,answers) if a.get('image_processing')]
+            answer['image_processing']={'method':'multiple_drawings','per_drawing':processing,
+                'required_views':[v for p in processing for v in p['required_views']],
+                'completed_views':[v for p in processing for v in p['completed_views']]}
         sources = {d['id']:d for d in drawings}
         for ev in answer['evidence']:
             source = sources[ev['drawing_id']]
