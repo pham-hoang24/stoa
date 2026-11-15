@@ -128,6 +128,7 @@ def test_invalid_requests_and_provider_failure_preserve_history(tmp_path):
     with running(tmp_path, broken, max_upload_bytes=1000) as base:
         path = '/chats/' + request(base, '/chats', 'POST', {})[1]['id']
         assert request(base, '/chats', 'POST', {}, {'Origin': 'https://evil.example'})[0] == 403
+        assert request(base, '/chats', 'POST', {}, {'Host': 'evil.example'})[0] == 403
         assert request(base, '/chats', 'POST', b'{')[0] == 400
         assert request(base, '/chats', 'POST', [])[0] == 400
         assert request(base, path + '/uploads?filename=x.png', 'POST', b'x' * 1001)[0] == 413
@@ -141,6 +142,23 @@ def test_invalid_requests_and_provider_failure_preserve_history(tmp_path):
     with running(tmp_path) as base:
         assert request(base, path + '/questions', 'POST', {'question': 'Again'})[1]['answer']['status'] == 'abstain'
         assert len(request(base, path)[1]['messages']) == 4
+
+
+def test_allowed_hosts_accept_public_host_and_origin(tmp_path):
+    with running(
+        tmp_path,
+        allowed_hosts=('stoa.example',),
+        allowed_origins=('https://stoa.example',),
+    ) as base:
+        status, chat = request(
+            base,
+            '/chats',
+            'POST',
+            {},
+            {'Host': 'stoa.example', 'Origin': 'https://stoa.example'},
+        )
+        assert status == 201
+        assert chat['id']
 
 
 def test_fabricated_evidence_or_malformed_answers_become_saved_abstains(tmp_path):
@@ -193,6 +211,23 @@ def test_frontend_can_be_served_same_origin_without_exposing_storage(tmp_path):
         response = urllib.request.urlopen(base + '/')
         assert b'Drawing chat' in response.read()
         assert response.headers['Content-Security-Policy']
+        assert request(base, '/../secret.txt')[0] == 404
+
+
+def test_landing_page_owns_root_and_chat_lives_at_chat(tmp_path):
+    frontend = tmp_path / 'frontend'
+    landing = tmp_path / 'landing'
+    for folder, title in ((frontend, 'Drawing chat'), (landing, 'Landing')):
+        folder.mkdir()
+        (folder / 'index.html').write_text(f'<title>{title}</title>')
+    (frontend / 'app.js').write_text('chat')
+    (landing / 'assets').mkdir()
+    (landing / 'assets' / 'site.js').write_text('site')
+    with running(tmp_path / 'storage', static_dir=frontend, landing_dir=landing) as base:
+        assert b'Landing' in urllib.request.urlopen(base + '/').read()
+        assert b'Drawing chat' in urllib.request.urlopen(base + '/chat').read()
+        assert urllib.request.urlopen(base + '/app.js').read() == b'chat'
+        assert urllib.request.urlopen(base + '/assets/site.js').read() == b'site'
         assert request(base, '/../secret.txt')[0] == 404
 
 

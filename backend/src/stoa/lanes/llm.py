@@ -6,9 +6,12 @@ Config is read at call time from env (.env, never committed):
   STOA_LLM_PROVIDER=modal selects MODAL_API_KEY plus STOA_MODAL_BASE_URL/STOA_MODAL_MODEL overrides.
   NVIDIA uses NVIDIA_API_KEY plus STOA_NVIDIA_BASE_URL/STOA_NVIDIA_MODEL overrides.
   STOA_LLM_FALLBACK selects modal (default), featherless, or none for NVIDIA timeouts.
-  STOA_LLM_TIMEOUT_SECONDS defaults to 60 seconds per provider attempt.
-Every call is cached under .cache/llm by provider, endpoint, model, messages and generation parameters.
-Cached replies are free and uncapped.
+  STOA_LLM_TIMEOUT_SECONDS defaults to 60 seconds per provider attempt; callers may pass a longer timeout.
+Every nonempty, untruncated reply is cached under .cache/llm by provider, endpoint, model, messages and
+generation parameters. Cached replies are free and uncapped. Empty or length-truncated replies are never
+cached, and forget(reply) evicts a cached reply the caller found unusable, so a retry samples afresh.
+reasoning=False asks reasoning models (NVIDIA Nemotron, Modal Qwen thinking) to answer without a hidden
+reasoning pass, whose tokens would otherwise count against max_tokens.
 SDK retries are disabled. NVIDIA timeouts may use one secondary attempt; each live
 attempt counts against the shared cap. Other failures raise LLMError directly.
 """
@@ -46,9 +49,12 @@ class ProviderTimeout(LLMError):
 class Completion(str):
     """Backward-compatible text carrying its actual producing provider identity."""
 
-    def __new__(cls, text, config, model, cached=False):
+    def __new__(cls, text, config, model, cached=False, cache_file=None, finish_reason=None):
         value = super().__new__(cls, text)
         value.provenance = {'provider': config['provider'], 'model': model, 'cached': cached}
+        if finish_reason:
+            value.provenance['finish_reason'] = finish_reason
+        value.cache_file = cache_file
         return value
 
     def __getnewargs__(self):
@@ -93,30 +99,54 @@ def _env() -> None:
     load_dotenv(REPO / ".env", override=False)
 
 
-def chat(messages: list[dict], model: str | None = None, max_tokens: int = 600, temperature: float = 0.0) -> str:
+def chat(messages: list[dict], model: str | None = None, max_tokens: int = 600, temperature: float = 0.0,
+         *, reasoning: bool | None = None, timeout: float | None = None) -> str:
     cfg = settings()
     try:
-        return _attempt(cfg, messages, model or cfg['model'], max_tokens, temperature)
-    except ProviderTimeout:
+        return _attempt(cfg, messages, model or cfg['model'], max_tokens, temperature, reasoning, timeout)
+    except ProviderTimeout as primary:
         secondary = cfg['fallback_provider']
         if not secondary:
             raise
         fallback = settings(secondary)
+        if not fallback['api_key']:
+            # Say what actually happened: the primary was slow, and no fallback could be tried.
+            raise ProviderTimeout(f"{primary}; fallback {secondary} not configured ({fallback['api_key_env']} unset)") from primary
         try:
-            result = _attempt(fallback, messages, fallback['model'], max_tokens, temperature)
+            result = _attempt(fallback, messages, fallback['model'], max_tokens, temperature, reasoning, timeout)
         except ProviderTimeout as exc:
             raise ProviderTimeout(f"{cfg['provider']} and {secondary} timed out; no further attempts") from exc
         result.provenance.update(fallback_from=cfg['provider'], fallback_reason='timeout')
         return result
 
 
-def _attempt(cfg: dict, messages: list[dict], model: str, max_tokens: int, temperature: float) -> Completion:
+def forget(reply) -> None:
+    """Evict a cached reply the caller could not use, so asking again gets a fresh sample."""
+    path = getattr(reply, 'cache_file', None)
+    if path is not None:
+        try:
+            Path(path).unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _attempt(cfg: dict, messages: list[dict], model: str, max_tokens: int, temperature: float,
+             reasoning: bool | None = None, timeout: float | None = None) -> Completion:
     """One cache lookup or one bounded SDK attempt; never recursively falls back."""
-    key = hashlib.sha256(json.dumps([cfg["provider"], cfg["base_url"], model, messages, max_tokens, temperature], sort_keys=True).encode()).hexdigest()
+    identity = [cfg["provider"], cfg["base_url"], model, messages, max_tokens, temperature]
+    extra = None
+    if reasoning is not None:
+        identity.append({'reasoning': reasoning})
+        if reasoning is False and cfg['provider'] in {'nvidia', 'modal'}:
+            extra = {'chat_template_kwargs': {'enable_thinking': False}}
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     cf = CACHE / f"{key}.txt"
     if cf.exists():
-        _count(cached=1)
-        return Completion(cf.read_text(), cfg, model, cached=True)
+        text = cf.read_text()
+        if text.strip():
+            _count(cached=1)
+            return Completion(text, cfg, model, cached=True, cache_file=cf)
+        cf.unlink(missing_ok=True)  # legacy empty reply: never replay it
     if not cfg["api_key"]:
         raise LLMError(f"no API key: set {cfg['api_key_env']}")
     with _LOCK:  # reserve the request before sending so parallel workers cannot overshoot the cap
@@ -124,11 +154,15 @@ def _attempt(cfg: dict, messages: list[dict], model: str, max_tokens: int, tempe
             raise LLMError(f"request cap reached ({cfg['max_requests']} live requests; raise STOA_LLM_MAX_REQUESTS)")
         _USAGE["calls"] += 1
     import openai
-    client = openai.OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"], timeout=cfg['timeout_seconds'], max_retries=0)
+    seconds = max(cfg['timeout_seconds'], timeout or 0)
+    client = openai.OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"], timeout=seconds, max_retries=0)
+    request = dict(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+    if extra:
+        request['extra_body'] = extra
     try:
-        out = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
+        out = client.chat.completions.create(**request)
     except openai.APITimeoutError as e:
-        raise ProviderTimeout(f"{cfg['provider']} timed out") from e
+        raise ProviderTimeout(f"{cfg['provider']} timed out after {seconds:g} s") from e
     except openai.AuthenticationError as e:
         raise LLMError(f"provider rejected the API key ({cfg['base_url']}): {e}") from e
     except openai.RateLimitError as e:
@@ -139,10 +173,15 @@ def _attempt(cfg: dict, messages: list[dict], model: str, max_tokens: int, tempe
         raise LLMError(f"provider error from {cfg['base_url']} ({type(e).__name__}): {e}") from e
     u = getattr(out, "usage", None)
     _count(prompt_tokens=getattr(u, "prompt_tokens", 0) or 0, completion_tokens=getattr(u, "completion_tokens", 0) or 0)
-    text = out.choices[0].message.content or ""
+    choice = out.choices[0]
+    text = choice.message.content or ""
+    finish = getattr(choice, 'finish_reason', None)
+    if not text.strip() or finish == 'length':
+        # Empty (reasoning spent the budget) or truncated: usable by nobody, so never cached.
+        return Completion(text, cfg, model, finish_reason=finish or 'empty')
     CACHE.mkdir(parents=True, exist_ok=True)
     cf.write_text(text)
-    return Completion(text, cfg, model)
+    return Completion(text, cfg, model, cache_file=cf)
 
 
 def image_part(png: bytes, mime: str = "image/png") -> dict:

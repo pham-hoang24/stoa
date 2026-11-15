@@ -5,23 +5,29 @@ Answers quantity-takeoff questions about construction drawings ("how many doors 
 ## Local drawing chatbot
 
 Run `uv sync`, then `uv run stoa-chat` (or `make chat`) and open
-http://127.0.0.1:8092. The dedicated buildless app lives in `frontend/`; the
-existing pitch site in `web/` is independent. No frontend install or build is needed.
+http://127.0.0.1:8092/chat. The dedicated buildless app lives in `frontend/`. The
+landing page in `web/` is served at `/` once built (`cd web && pnpm install && pnpm build`)
+and links to the chat; without a build, `/` is the chat. The chat itself needs no build.
 Python source and tests live in `backend/src/` and `backend/tests/`.
 
 Create a conversation, upload several PNG, JPEG, PDF, IFC, DXF or SVG drawings,
 select the relevant drawings, and ask a question. Follow-ups retain selected scope
 and target context. Use source buttons to open a safe PNG page preview with
 source-coordinate boxes, polygons or calibration lines, inspect native entity
-IDs/properties and calculations, or open the original. Native entities without
-spatial previews still expose their source properties. Delete removes a conversation
+IDs/properties and calculations, or open the original. IFC and DXF uploads get a
+plan view drawn from their own geometry (DXF modelspace; one page per IFC storey),
+with cited entities boxed at their geometric extent. Native entities without
+drawable geometry keep a plain ID citation with their source properties. Delete removes a conversation
 and uploads unreferenced by other conversations.
 
 Chats and originals persist in `.cache/chat/` (SQLite plus content-addressed assets).
 Use `uv run stoa-chat --storage /path/to/local-data --port 8092` to choose another
 location, and `--frontend /path/to/frontend` to override the static app directory.
-Run one process per storage directory. This local prototype has no accounts or
-remote deployment configuration; it binds to `127.0.0.1`.
+Run one process per storage directory. This prototype has no accounts. Locally it
+binds to `127.0.0.1`; for Render (or any public host) use
+`uv run stoa-chat --host 0.0.0.0 --port $PORT`. The CLI also reads `PORT`,
+auto-allows `RENDER_EXTERNAL_HOSTNAME`, and accepts extra hosts via
+`--allowed-host` or `STOA_ALLOWED_HOSTS`.
 
 IFC uploads accept up to 512 MiB by default; other formats retain a 50 MiB limit.
 For larger models, use `uv run stoa-chat --max-ifc-upload-mib 1024` (1 GiB).
@@ -41,15 +47,16 @@ uv run stoa-chat --llm-provider nvidia --llm-fallback modal
 # Or: --llm-fallback featherless
 ```
 
-The timeout defaults to **60 seconds per provider attempt**; override it with
-`--llm-timeout-seconds 30`. Equivalent environment options are
+The timeout defaults to **60 seconds per provider attempt** (chat extraction calls
+wait at least 120 seconds); override it with `--llm-timeout-seconds 30`. Equivalent environment options are
 `STOA_LLM_PROVIDER=nvidia`, `STOA_LLM_FALLBACK=modal`, and
 `STOA_LLM_TIMEOUT_SECONDS=60`. Use fallback `none` to disable automatic fallthrough.
 Only SDK timeouts or HTTP 408/504 activate fallback. Authentication errors,
 rate limits, connection failures, HTTP 503 and other errors remain explicit.
 A secondary timeout stops the chain; there are at most two live attempts per model call.
 Each attempt counts against `STOA_LLM_MAX_REQUESTS` (default 200 per process).
-Cached replies remain free, separated by provider/endpoint/model; fallback results
+Cached replies remain free, separated by provider/endpoint/model; empty, truncated or
+unusable replies are never replayed from the cache. Fallback results
 are never cached as NVIDIA answers. Answer provenance identifies the actual
 provider/model and records timeout fallthrough.
 
@@ -63,7 +70,7 @@ silent credential reuse or fallthrough. Explicit `--llm-provider modal` or
 `--llm-provider featherless` runs that provider directly without NVIDIA fallback.
 Restart the server when changing CLI or `.env` settings.
 
-Answers distinguish **native source support**, **unreviewed model proposals**,
+Answers distinguish **native source support**, **unreviewed model or rule-based proposals**,
 **estimates**, **clarification**, **abstention** and **analysis errors**. Model
 extraction supplies facts and regions; Python computes quantities. A quantity
 needs adequate evidence, units and scale, with height for volume. Multiple drawing

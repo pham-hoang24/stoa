@@ -4,7 +4,9 @@ import hashlib
 import os
 import mimetypes
 import sqlite3
+import sys
 import threading
+import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,6 +30,7 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.assets = self.root / 'assets'
         self.assets.mkdir(exist_ok=True)
+        self.native_previews = self.root / 'native_previews'
         self.lock = threading.RLock()
         self.db = sqlite3.connect(self.root / 'chats.sqlite3', check_same_thread=False)
         self.db.execute('CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
@@ -40,6 +43,11 @@ class Store:
         for asset in self.assets.iterdir():
             if asset.is_file() and asset.name not in referenced:
                 asset.unlink(missing_ok=True)
+        if self.native_previews.is_dir():
+            import shutil
+            for cached in self.native_previews.iterdir():
+                if cached.name.split('-v')[0] not in referenced:
+                    shutil.rmtree(cached, ignore_errors=True)
 
     def get(self, chat_id):
         row = self.db.execute('SELECT data FROM chats WHERE id=?', (chat_id,)).fetchone()
@@ -52,7 +60,17 @@ class Store:
         self.db.commit()
 
 
-def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES):
+def _hostname(host_header):
+    """Strip a trailing :port when present; leave bare hostnames unchanged."""
+    if host_header.startswith('[') and ']' in host_header:
+        return host_header[1:host_header.index(']')]
+    name, sep, maybe_port = host_header.rpartition(':')
+    if sep and maybe_port.isdigit():
+        return name
+    return host_header
+
+
+def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES, landing_dir=None, allowed_hosts=()):
     """Create a local server; the caller owns serve_forever/shutdown/server_close."""
     upload_limits = {'default': max_upload_bytes, 'ifc': max_ifc_upload_bytes}
     if any(type(limit) is not int or limit <= 0 for limit in upload_limits.values()):
@@ -61,6 +79,7 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
     if answerer is None:
         from .analysis import HybridAnswerer
         answerer = HybridAnswerer()
+    public_hosts = {h for h in allowed_hosts if h}
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -107,21 +126,121 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 if origin and origin not in local_origins | set(allowed_origins):
                     raise ApiError(403, 'Browser origin is not allowed')
                 host_header = self.headers.get('Host', '')
-                if host_header not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
+                local_hosts = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+                if host_header not in local_hosts and host_header not in public_hosts and _hostname(host_header) not in public_hosts:
                     raise ApiError(403, 'Host is not allowed')
-                with store.lock:
-                    self.route()
+                self.route()
             except ApiError as exc:
                 self.respond(exc.status, {'error': exc.message})
             except (OSError, sqlite3.Error):
                 self.respond(500, {'error': 'Local storage is unavailable; please retry'})
+            except Exception:
+                traceback.print_exc(file=sys.stderr)
+                try:
+                    self.respond(500, {'error': 'Internal server error'})
+                except OSError:
+                    pass
 
         def route(self):
+            parts = unquote(urlsplit(self.path).path).strip('/').split('/')
+            if len(parts) == 4 and parts[:2] == ['api', 'chats'] and parts[3] == 'questions' and self.command == 'POST':
+                return self.ask(parts[2])
+            if len(parts) in {5, 6} and parts[:2] == ['api', 'chats'] and parts[3] == 'previews' and self.command == 'GET':
+                return self.preview(parts)
+            with store.lock:
+                return self.locked_route()
+
+        def ask(self, chat_id):
+            # The lock covers store access only, never the (slow) answerer call.
+            with store.lock:
+                store.get(chat_id)
+            data = self.read_json()
+            question = data.get('question')
+            with store.lock:
+                chat = store.get(chat_id)
+                selection = data.get('drawing_ids', chat['selected_drawing_ids'])
+                if not isinstance(question, str) or not question.strip() or len(question) > 10000:
+                    raise ApiError(400, 'A nonempty question is required')
+                if not isinstance(selection, list) or not selection or any(not isinstance(i, str) or i not in [d['id'] for d in chat['drawings']] for i in selection) or len(selection) != len(set(selection)):
+                    raise ApiError(400, 'Select drawings belonging to this chat')
+                context = {'question': question, 'drawing_ids': selection, 'messages': chat['messages'][:],
+                           'drawings': [{**d, 'path': store.assets / d['sha256']} for d in chat['drawings'] if d['id'] in selection]}
+                chat['selected_drawing_ids'] = selection
+                user_message = {'id': uuid.uuid4().hex, 'role': 'user', 'question': question, 'drawing_ids': selection}
+                chat['messages'].append(user_message)
+                store.save(chat)
+            try:
+                answer = answerer(context) if answerer else abstain('Analysis service is not configured')
+            except Exception:
+                answer = abstain('Analysis failed; please retry', 'analysis_error')
+            try:
+                answer = validate_answer(answer, context['drawings'])
+            except ValueError:
+                answer = abstain('Analysis returned invalid or unresolvable evidence', 'invalid_analysis')
+            from .native_preview import attach
+            answer = attach(answer, context['drawings'], store.native_previews)
+            message = {'id': uuid.uuid4().hex, 'role': 'assistant', 'drawing_ids': selection, 'answer': answer}
+            for index, evidence in enumerate(answer.get('evidence', [])):
+                evidence['url'] = '/api/chats/' + chat_id + '/evidence/' + message['id'] + '/' + str(index)
+            with store.lock:
+                chat = store.get(chat_id)  # 404 if the chat was deleted meanwhile; never resurrected
+                ids = [m['id'] for m in chat['messages']]
+                if user_message['id'] not in ids:
+                    raise ApiError(404, 'Chat not found')
+                # Place the answer right after its own question so concurrent questions stay paired.
+                chat['messages'].insert(ids.index(user_message['id']) + 1, message)
+                store.save(chat)
+            return self.respond(200, message)
+
+        def preview(self, parts):
+            # Lazy IFC/DXF plan geometry runs without the store lock (it can take
+            # seconds); assets are immutable and content-addressed.
+            with store.lock:
+                chat = store.get(parts[2])
+                drawing = next((d for d in chat['drawings'] if d['id'] == parts[4]), None)
+                if drawing is None:
+                    raise ApiError(404, 'Drawing not in this chat')
+                drawing = {**drawing, 'path': store.assets / drawing['sha256']}
+            from . import native_preview
+            if len(parts) == 5:
+                # Plan index for native sources: pages, entity boxes, or why not.
+                result = native_preview.plan(drawing, store.native_previews)
+                return self.respond(202 if result['status'] == 'pending' else 200, result)
+            try:
+                if drawing['format'] in {'ifc', 'dxf'}:
+                    body = native_preview.page_png(drawing, int(parts[5]), store.native_previews)
+                else:
+                    from .render import preview
+                    with store.lock:  # raster previews keep their original locking
+                        body, _ = preview(drawing, int(parts[5]))
+            except (ValueError, RuntimeError):
+                raise ApiError(404, 'Preview unavailable')
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def locked_route(self):
             path = unquote(urlsplit(self.path).path)
             if static_dir is not None and self.command == 'GET' and not path.startswith('/api/'):
-                root = Path(static_dir).resolve()
-                target = (root / (path.lstrip('/') or 'index.html')).resolve()
-                if not target.is_relative_to(root) or not target.is_file():
+                # Built landing page owns `/`; the chat app is at `/chat` and keeps its root-level assets.
+                landing = Path(landing_dir).resolve() if landing_dir is not None and (Path(landing_dir) / 'index.html').is_file() else None
+                if path in ('/chat', '/chat/'):
+                    path = '/index.html'
+                    roots = [Path(static_dir).resolve()]
+                else:
+                    roots = [Path(static_dir).resolve()] + ([landing] if landing else [])
+                    if landing and path in ('', '/'):
+                        roots.reverse()
+                target = None
+                for root in roots:
+                    candidate = (root / (path.lstrip('/') or 'index.html')).resolve()
+                    if candidate.is_relative_to(root) and candidate.is_file():
+                        target = candidate
+                        break
+                if target is None:
                     raise ApiError(404, 'Frontend asset not found')
                 body = target.read_bytes()
                 self.send_response(200)
@@ -190,49 +309,6 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                     self.end_headers()
                     self.wfile.write(body)
                     return
-                if parts[3] == 'previews' and len(parts) == 6 and self.command == 'GET':
-                    drawing = next((d for d in chat['drawings'] if d['id'] == parts[4]), None)
-                    if drawing is None:
-                        raise ApiError(404, 'Drawing not in this chat')
-                    from .render import preview
-                    try:
-                        body, _ = preview({**drawing, 'path': store.assets / drawing['sha256']}, int(parts[5]))
-                    except (ValueError, RuntimeError):
-                        raise ApiError(404, 'Preview unavailable')
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'image/png')
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('X-Content-Type-Options', 'nosniff')
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                if parts[3] == 'questions' and len(parts) == 4 and self.command == 'POST':
-                    data = self.read_json()
-                    question = data.get('question')
-                    selection = data.get('drawing_ids', chat['selected_drawing_ids'])
-                    if not isinstance(question, str) or not question.strip() or len(question) > 10000:
-                        raise ApiError(400, 'A nonempty question is required')
-                    if not isinstance(selection, list) or not selection or any(not isinstance(i, str) or i not in [d['id'] for d in chat['drawings']] for i in selection) or len(selection) != len(set(selection)):
-                        raise ApiError(400, 'Select drawings belonging to this chat')
-                    context = {'question': question, 'drawing_ids': selection, 'messages': chat['messages'][:],
-                               'drawings': [{**d, 'path': store.assets / d['sha256']} for d in chat['drawings'] if d['id'] in selection]}
-                    chat['selected_drawing_ids'] = selection
-                    chat['messages'].append({'id': uuid.uuid4().hex, 'role': 'user', 'question': question, 'drawing_ids': selection})
-                    store.save(chat)
-                    try:
-                        answer = answerer(context) if answerer else abstain('Analysis service is not configured')
-                    except Exception:
-                        answer = abstain('Analysis failed; please retry', 'analysis_error')
-                    try:
-                        answer = validate_answer(answer, context['drawings'])
-                    except ValueError:
-                        answer = abstain('Analysis returned invalid or unresolvable evidence', 'invalid_analysis')
-                    message = {'id': uuid.uuid4().hex, 'role': 'assistant', 'drawing_ids': selection, 'answer': answer}
-                    for index, evidence in enumerate(answer.get('evidence', [])):
-                        evidence['url'] = base + '/evidence/' + message['id'] + '/' + str(index)
-                    chat['messages'].append(message)
-                    store.save(chat)
-                    return self.respond(200, message)
                 if parts[3] == 'evidence' and len(parts) == 6 and self.command == 'GET':
                     for message in chat['messages']:
                         if message['id'] == parts[4] and message['role'] == 'assistant':

@@ -1,6 +1,6 @@
 # Local drawing chat backend
 
-Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=52428800, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=536870912)` returns stdlib ThreadingHTTPServer. Caller runs serve_forever/shutdown/server_close. New backend only, independent from legacy benchmark.
+Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=52428800, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=536870912, landing_dir=None, allowed_hosts=())` returns stdlib ThreadingHTTPServer. Caller runs serve_forever/shutdown/server_close. New backend only, independent from legacy benchmark.
 
 - POST /api/chats JSON {title?} → 201 chat
 - GET /api/config → {upload_limits: {default: bytes, ifc: bytes}}; frontend validation uses these active limits.
@@ -10,7 +10,8 @@ Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, a
 - POST /api/chats/{chat_id}/questions JSON {question, drawing_ids?:[id]} → assistant message {id,role:'assistant',drawing_ids,answer}. Omitted drawing_ids inherits prior selected scope; first question must select explicitly. User and assistant messages persisted. Unknown/empty selections 400.
 - GET /api/chats/{chat_id}/assets/{drawing_id} → original source bytes, chat-scoped.
 - GET /api/chats/{chat_id}/evidence/{assistant_message_id}/{index} → evidence JSON, chat-scoped.
-- GET /api/chats/{chat_id}/previews/{drawing_id}/{page} → safe PNG with source mapping retained on evidence.
+- GET /api/chats/{chat_id}/previews/{drawing_id}/{page} → safe PNG with source mapping retained on evidence. For IFC/DXF this is a plan view drawn from entity geometry (frame: source XY with y negated; DXF modelspace units, IFC world metres).
+- GET /api/chats/{chat_id}/previews/{drawing_id} → IFC/DXF plan index: 202 {status:'pending'} while geometry is computed in the background (first request starts it; cached on disk under `native_previews/<sha256>-v<N>/`), then 200 {status:'ready', layout:'modelspace'|'storeys'|'whole_model', pages:[{page,label,width,height,origin,units,pixel_width,pixel_height}], entities:{entity_id:[page,x0,y0,x1,y1]}} or 200 {status:'unavailable', reason} when the file has no drawable geometry or the element cap / time budget is hit. Native answer evidence for drawn entities gains page, bbox, preview_url and source_* fields from this index (storeys get their page only); entities without geometry keep only their id. IFC/DXF drawing `pages` stay empty.
 - Errors JSON {error: readable string}, 400/403/404/413.
 
 Injected `answerer(context: dict) -> dict` is synchronous. Context: question, drawing_ids, messages (prior messages only), drawings (selected drawing metadata plus backend-private pathlib Path in `path`). Paths never sent over HTTP. Each drawing's pages has page (one-based), width,height,units where available. Metadata format lowercase png/jpeg/pdf/ifc/dxf/svg.
@@ -40,29 +41,42 @@ at most two live attempts, which
 share the process request cap; cached replies remain free and endpoint-specific.
 
 `--llm-timeout-seconds` overrides positive finite `STOA_LLM_TIMEOUT_SECONDS`
-(default 60 per attempt). NVIDIA uses `STOA_NVIDIA_BASE_URL`/`STOA_NVIDIA_MODEL`
+(default 60 per attempt; chat extraction waits at least 120 s). Extraction calls ask
+reasoning models to skip their hidden reasoning pass (`enable_thinking: false`), which
+otherwise consumed the output budget and returned empty replies. Empty or truncated
+replies are never cached, and replies that fail validation are evicted from the cache.
+If NVIDIA times out and the fallback has no key, the answer says so. NVIDIA uses `STOA_NVIDIA_BASE_URL`/`STOA_NVIDIA_MODEL`
 overrides, Modal uses `MODAL_API_KEY` with `STOA_MODAL_BASE_URL`/`STOA_MODAL_MODEL`,
 and Featherless retains its existing `STOA_LLM_*` overrides. Explicit Modal or
 Featherless primary selection does not start the NVIDIA fallback chain.
 `model_provenance` reports the producing provider/model, cache status, and
 `fallback_from`/`fallback_reason` when used. Multi-file totals retain per-drawing
 provenance and identify mixed providers explicitly. No credential is included.
-Invalid extraction JSON or evidence receives at most one correction request using
-the same sources and exact preview dimensions. Each correction is a separate model
+The JSON object is extracted from the reply even when wrapped in markdown fences or
+prose. Invalid extraction JSON or evidence receives at most one correction request using
+the same sources and exact preview dimensions (an empty reply is simply resampled). Each correction is a separate model
 call under the same process cap and timeout/fallback policy (up to four live provider
 attempts per drawing when both calls time out on NVIDIA). Provider errors and deliberate
 abstentions do not trigger correction. Exhausted invalid outputs retain no quantity
 and report a safe validation reason. `model_provenance.extraction_attempts` records
 one or two model calls. Visual facts may declare `coordinate_space: normalized_1000`
 for both axes or `preview_pixels`; omitted units retain legacy preview pixels. Only
-explicit normalized coordinates are converted; invalid boxes are never guessed or clamped.
+explicit normalized coordinates are converted. A box overshooting its view by at most 2%
+of the side is clamped and marked `clamped: true`; anything further is rejected, never guessed.
+Lookup, yes/no and descriptive questions may use operation `answer`: a concise reply
+accepted only with at least one valid cited region (with `printed_text` where text was
+read). Counts, sums, products and areas are still calculated by Python from facts; for
+`answer` and `text`, one malformed citation is dropped (and reported in the explanation)
+instead of discarding the answer. When local OCR words spell a cited `printed_text` near
+the model's box, the evidence box snaps to those words (`bbox_source: 'ocr'`, original
+kept as `model_bbox`).
 See the root README for runnable configuration.
 
 The server stores chat JSON transactionally in SQLite and originals under SHA-256 filenames in `assets/`. Asset creation uses atomic replacement before the chat transaction commits. Deleting a chat retains material referenced by other chats; restart also removes orphaned temporary or unreferenced assets. Run one backend process per storage directory. Storage is local and has no accounts or cloud synchronization.
 
 Default upload limits are 512 MiB for IFC (`max_ifc_upload_bytes`) and 50 MiB for other formats (`max_upload_bytes`). Set `stoa-chat --max-ifc-upload-mib 1024` to accept IFC models up to 1 GiB. Both limits must be positive byte counts; the CLI accepts a positive whole number of MiB. A larger filename-based size allowance does not bypass content validation. JSON requests are bounded to 1 MiB, questions to 10,000 characters, titles to 200 characters. PDF accepts 1–1000 accessible, unencrypted pages; image pixel limit is 80 million. SVG uses static element and inline presentation-style allowlists and disallows script, events, document declarations, active CSS and external resources. DXF accepts complete ASCII and binary drawings. Original coordinates are retained: raster pixels, PDF points, SVG viewBox including origin, or explicit width/height in user coordinates when no viewBox exists. Absolute SVG length units are converted to CSS pixels at 96 dpi; relative or omitted dimensions remain unresolved rather than inventing a viewport. PNG/JPEG header dimensions are bounded before allocating decoded pixels. IFC GlobalIds and DXF handles are included as `entity_ids`.
 
-Browser Host must be localhost or 127.0.0.1 with the current server port; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds only 127.0.0.1. This is a local prototype, with no authentication or remote deployment configuration.
+Browser Host must be localhost or 127.0.0.1 with the current server port, or a value in `allowed_hosts`; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds `127.0.0.1:8092`. For Render: `uv run stoa-chat --host 0.0.0.0 --port $PORT` (PORT defaults from the environment; `RENDER_EXTERNAL_HOSTNAME` is allowlisted automatically). No authentication.
 
 Public HTTP coverage: 31 tests passed on 2026-11-14, including restart, deletion/shared assets, all formats, multipage PDF, question/follow-up/evidence, malformed requests and answers, provider exceptions, unsafe SVG, scope isolation, and frontend path isolation. Controlled analysis tests verify application behavior, not perception accuracy. No provider was called.
 
@@ -79,8 +93,17 @@ abstain: absence of IfcDoor occurrences does not prove the physical absence of d
 Missing GlobalIds cannot silently reduce a complete count. Native scope errors
 suggest narrowing elements rather than selecting nonexistent IFC pages.
 
-PNG/JPEG uploads larger than 1,600 pixels on either axis use a contextual overview
-and lossless 1,400-pixel crops from the normalized original, with 20% overlap.
+PNG/JPEG questions use one full view of up to 3,000 pixels per side (the model
+downsamples internally, so more pixels do not help). Only count questions on images
+larger than 3,000 pixels use a contextual overview and lossless 1,400-pixel crops from
+the normalized original, with 20% overlap.
+Count questions on images whose longest side is under 1,600 pixels are enlarged
+(cubic, at most 6x) to about 2,600 pixels and read as overlapping 1,400-pixel tiles,
+each sent as its own one-image request with short drawing conventions for the asked
+object (windows, doors, stairs; English or Finnish wording, and German, French or Italian for doors and windows). Python keeps each
+detection only in the tile whose core holds its centre, counts a detection seen by two
+tiles once, and leaves out (and reports) boxes far larger than the other counted
+objects; one unreadable tile abstains (`image_processing.method` `enlarged_tiles`).
 Each crop has a source transform and a nonoverlapping ownership core. Counts must
 cite complete objects in the owning detail view; the overview cannot supply count
 facts. Clipped regions, missing coverage and conflicting overlap detections cannot
@@ -89,16 +112,34 @@ source coordinates; repeated labels at different positions remain distinct.
 
 Count requests inspect every required crop in sequential batches of at most three
 crops plus the overview. Each batch retains the existing correction, timeout-only
-fallback and shared process cap. An exhausted cap or failed batch stops the total.
+fallback and shared process cap. A batch with invalid output is retried once
+(`image_processing.retried_batches`); completed batches are kept. An exhausted cap or a
+batch that fails again stops the total.
 `image_processing` records required/completed region IDs, source bounds and duplicate
 reconciliation; `model_provenance.per_batch` retains actual provider/cache/fallback
 metadata. The chat displays completed versus required image regions. Coverage records
 successful extraction processing, not independently verified detection accuracy.
 
-Initial bounds are 64 detail crops, 3,000 aggregate count detections, and 12 detail
-crops jointly for text/measurement questions. Exceeding a bound abstains explicitly;
+Initial bounds are 64 detail crops and 3,000 aggregate count detections. Exceeding a
+bound abstains explicitly;
 no crops or detections are silently omitted. Geometry and calibration from different
-views are converted to the original source frame before calculation. Smaller raster
-uploads keep their existing single-view path. PDF/SVG rendering and IFC behavior are
-unchanged in this milestone. OCR is delegated separately in issue #58; this milestone
+views are converted to the original source frame before calculation. Other questions
+on smaller rasters, and counts on rasters of 1,600 to 3,000 pixels, keep the single-view
+path. A count on a one-page vector PDF whose plan fills a small part of the sheet reads
+the region holding the drawn plan the same way, enlarged to about 2,600 pixels and tiled
+(`image_processing.method` `enlarged_vector_region`, boxes in page points). SVG rendering
+and IFC behavior are unchanged in this milestone.
+
+Unfiltered door counts on vector PDFs are answered from the page geometry, without a
+model: a door is a stroked quarter-circle arc with a straight leaf from its hinge,
+door-sized at the printed scale (or on paper without one), inside the plan (not across a
+sheet divider such as a legend strip, not part of a full-circle symbol); coincident arcs
+count once and two leaves meeting mid-opening count as one door. DXF door and window
+counts use layers whose names mean door or window (DOOR, TÜR, PORTE, FENSTER, ...): one
+door per quarter-circle arc, one window per closed outline, identical copies once; any
+other entity on such a layer that does not belong to an arc or outline leaves the
+question to the existing path. These answers are `proposal`s with `review_status`
+`rule_based` and the rule in `calculation.method`, one box per counted object. A page
+with no such geometry falls through instead of answering zero. A visual count of zero
+says that nothing was detected and that the zero is unverified. OCR is delegated separately in issue #58; this milestone
 does not require or automatically run an OCR engine.

@@ -150,17 +150,21 @@ def test_reconciliation_budget_never_truncates_into_count(monkeypatch):
 @pytest.mark.parametrize('kind,operation,values,expected',[
     ('length','sum',[2],2),('area','product',[2,3],6),
     ('volume','product',[2,3,4],24),('text','text',[], 'Kitchen')])
-def test_detail_path_keeps_other_question_kinds(tmp_path,monkeypatch,kind,operation,values,expected):
+def test_large_non_count_questions_use_one_full_view(tmp_path,monkeypatch,kind,operation,values,expected):
+    """Non-count questions no longer tile (tiling exhausted the model's budget); one view, source-frame boxes."""
     d=drawing(tmp_path)
     def respond(messages,**kw):
         p=json.loads(messages[1]['content'][0]['text'])
-        v=next(v for v in p['pages'] if v.get('role')=='detail')
+        assert sum(c['type']=='image_url' for c in messages[1]['content'])==1
+        assert len(p['pages'])==1 and p['pages'][0].get('role') is None
+        v=p['pages'][0]
+        assert v['width']==render.SINGLE_VIEW_MAX_SIDE
         facts=[{'page_ref':v['id'],'bbox':[20+i*30,50,40+i*30,70],'kind':'length',
                 'value':value,'unit':'m','printed_text':f'{value} m'} for i,value in enumerate(values)]
         if kind=='text':facts=[{'page_ref':v['id'],'bbox':[20,50,100,70],'kind':'text','value':'Kitchen'}]
-        return json.dumps({'operation':operation,'complete':True,'coverage':p['required_coverage'],'facts':facts})
+        return json.dumps({'operation':operation,'complete':True,'facts':facts})
     monkeypatch.setattr(llm,'chat',respond)
     c=context(d);c['question']='What is the '+kind+'?'
     answer=HybridAnswerer()(c)
     assert answer['status']=='proposal' and answer['value']==expected
-    assert len(answer['image_processing']['completed_views'])==3
+    assert answer['evidence'][0]['bbox'][0]==pytest.approx(20*3200/3000)
