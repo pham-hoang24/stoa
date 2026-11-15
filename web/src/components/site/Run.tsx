@@ -1,7 +1,7 @@
 import { useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { CHAT_URL } from "@/lib/chat"
+import { CHAT_URL, IS_LOCAL } from "@/lib/chat"
 
 const REPO = "https://github.com/pham-hoang24/stoa"
 const SNIPPET = `uv sync
@@ -34,9 +34,11 @@ export function Run() {
             Run the local viewer, choose your drawing, ask a question and inspect its source. You can also try the verified Swiss Dwellings questions above before installing anything.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
+            {(IS_LOCAL || import.meta.env.VITE_CHAT_URL) && (
             <Button render={<a href={CHAT_URL} />} nativeButton={false} className="h-11 rounded-full px-6 text-[15px]">
               Open the chat
             </Button>
+            )}
             <Button render={<a href={REPO} />} nativeButton={false} variant="outline" className="h-11 rounded-full px-6 text-[15px]">
               Read the code
             </Button>

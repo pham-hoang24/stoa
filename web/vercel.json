@@ -1,14 +1,1 @@
-{
-  "redirects": [
-    {
-      "source": "/chat",
-      "destination": "https://stoa-80wy.onrender.com/chat",
-      "permanent": false
-    },
-    {
-      "source": "/chat/",
-      "destination": "https://stoa-80wy.onrender.com/chat",
-      "permanent": false
-    }
-  ]
-}
+{}
