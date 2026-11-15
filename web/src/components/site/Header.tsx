@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
+import { CHAT_URL } from "@/lib/chat"
 
 const NAV = [
   { href: "#demo", label: "Demo" },
@@ -64,8 +65,8 @@ export function Header() {
           <span ref={pct} aria-hidden className="label hidden w-8 text-right tabular-nums sm:inline">
             0%
           </span>
-          <Button render={<a href="#run" />} nativeButton={false} size="lg" className="h-9 rounded-full px-4">
-            Run it locally
+          <Button render={<a href={CHAT_URL} />} nativeButton={false} size="lg" className="h-9 rounded-full px-4">
+            Open the chat
           </Button>
         </div>
       </div>

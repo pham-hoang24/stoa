@@ -1,11 +1,12 @@
 import { useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { CHAT_URL } from "@/lib/chat"
 
 const REPO = "https://github.com/pham-hoang24/stoa"
 const SNIPPET = `uv sync
-export STOA_DATASET=/path/to/junction-dataset
-stoa serve`
+cd web && pnpm install && pnpm build && cd ..
+uv run stoa-chat`
 
 export function Run() {
   const [copied, setCopied] = useState(false)
@@ -33,7 +34,10 @@ export function Run() {
             Run the local viewer, choose your drawing, ask a question and inspect its source. You can also try the verified Swiss Dwellings questions above before installing anything.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Button render={<a href={REPO} />} nativeButton={false} className="h-11 rounded-full px-6 text-[15px]">
+            <Button render={<a href={CHAT_URL} />} nativeButton={false} className="h-11 rounded-full px-6 text-[15px]">
+              Open the chat
+            </Button>
+            <Button render={<a href={REPO} />} nativeButton={false} variant="outline" className="h-11 rounded-full px-6 text-[15px]">
               Read the code
             </Button>
             <Button
@@ -49,7 +53,7 @@ export function Run() {
 
         <div className="overflow-hidden rounded-xl border bg-forest-950 text-primary-foreground">
           <div className="flex items-center justify-between border-b border-white/15 px-4 py-2.5">
-            <span className="font-mono text-xs text-white/70">terminal · http://127.0.0.1:8765</span>
+            <span className="font-mono text-xs text-white/70">terminal · http://127.0.0.1:8092</span>
             <button
               type="button"
               onClick={copy}

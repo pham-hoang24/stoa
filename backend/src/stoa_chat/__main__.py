@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--storage', type=Path, default=ROOT / '.cache' / 'chat')
     parser.add_argument('--port', type=int, default=8092)
     parser.add_argument('--frontend', type=Path, default=ROOT / 'frontend')
+    parser.add_argument('--landing', type=Path, default=ROOT / 'web' / 'dist',
+                        help='built landing page served at / when it exists (cd web && pnpm build); chat is then at /chat')
     parser.add_argument('--llm-provider', choices=('nvidia', 'featherless', 'modal'),
                         help='override STOA_LLM_PROVIDER for this server process')
     parser.add_argument('--llm-fallback', choices=('featherless', 'modal', 'none'),
@@ -33,9 +35,9 @@ def main():
         if not math.isfinite(args.llm_timeout_seconds) or args.llm_timeout_seconds <= 0:
             parser.error('--llm-timeout-seconds must be positive and finite')
         os.environ['STOA_LLM_TIMEOUT_SECONDS'] = str(args.llm_timeout_seconds)
-    server = create_server(args.storage, port=args.port, static_dir=args.frontend,
+    server = create_server(args.storage, port=args.port, static_dir=args.frontend, landing_dir=args.landing,
                            max_ifc_upload_bytes=args.max_ifc_upload_mib * MIB)
-    print(f'Drawing chat: http://127.0.0.1:{server.server_port}', flush=True)
+    print(f'Drawing chat: http://127.0.0.1:{server.server_port}/chat', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

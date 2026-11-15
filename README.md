@@ -5,8 +5,9 @@ Answers quantity-takeoff questions about construction drawings ("how many doors 
 ## Local drawing chatbot
 
 Run `uv sync`, then `uv run stoa-chat` (or `make chat`) and open
-http://127.0.0.1:8092. The dedicated buildless app lives in `frontend/`; the
-existing pitch site in `web/` is independent. No frontend install or build is needed.
+http://127.0.0.1:8092/chat. The dedicated buildless app lives in `frontend/`. The
+landing page in `web/` is served at `/` once built (`cd web && pnpm install && pnpm build`)
+and links to the chat; without a build, `/` is the chat. The chat itself needs no build.
 Python source and tests live in `backend/src/` and `backend/tests/`.
 
 Create a conversation, upload several PNG, JPEG, PDF, IFC, DXF or SVG drawings,

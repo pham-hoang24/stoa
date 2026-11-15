@@ -60,7 +60,7 @@ class Store:
         self.db.commit()
 
 
-def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES):
+def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES, landing_dir=None):
     """Create a local server; the caller owns serve_forever/shutdown/server_close."""
     upload_limits = {'default': max_upload_bytes, 'ifc': max_ifc_upload_bytes}
     if any(type(limit) is not int or limit <= 0 for limit in upload_limits.values()):
@@ -213,9 +213,22 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
         def locked_route(self):
             path = unquote(urlsplit(self.path).path)
             if static_dir is not None and self.command == 'GET' and not path.startswith('/api/'):
-                root = Path(static_dir).resolve()
-                target = (root / (path.lstrip('/') or 'index.html')).resolve()
-                if not target.is_relative_to(root) or not target.is_file():
+                # Built landing page owns `/`; the chat app is at `/chat` and keeps its root-level assets.
+                landing = Path(landing_dir).resolve() if landing_dir is not None and (Path(landing_dir) / 'index.html').is_file() else None
+                if path in ('/chat', '/chat/'):
+                    path = '/index.html'
+                    roots = [Path(static_dir).resolve()]
+                else:
+                    roots = [Path(static_dir).resolve()] + ([landing] if landing else [])
+                    if landing and path in ('', '/'):
+                        roots.reverse()
+                target = None
+                for root in roots:
+                    candidate = (root / (path.lstrip('/') or 'index.html')).resolve()
+                    if candidate.is_relative_to(root) and candidate.is_file():
+                        target = candidate
+                        break
+                if target is None:
                     raise ApiError(404, 'Frontend asset not found')
                 body = target.read_bytes()
                 self.send_response(200)

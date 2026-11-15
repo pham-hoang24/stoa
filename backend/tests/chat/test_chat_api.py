@@ -196,6 +196,23 @@ def test_frontend_can_be_served_same_origin_without_exposing_storage(tmp_path):
         assert request(base, '/../secret.txt')[0] == 404
 
 
+def test_landing_page_owns_root_and_chat_lives_at_chat(tmp_path):
+    frontend = tmp_path / 'frontend'
+    landing = tmp_path / 'landing'
+    for folder, title in ((frontend, 'Drawing chat'), (landing, 'Landing')):
+        folder.mkdir()
+        (folder / 'index.html').write_text(f'<title>{title}</title>')
+    (frontend / 'app.js').write_text('chat')
+    (landing / 'assets').mkdir()
+    (landing / 'assets' / 'site.js').write_text('site')
+    with running(tmp_path / 'storage', static_dir=frontend, landing_dir=landing) as base:
+        assert b'Landing' in urllib.request.urlopen(base + '/').read()
+        assert b'Drawing chat' in urllib.request.urlopen(base + '/chat').read()
+        assert urllib.request.urlopen(base + '/app.js').read() == b'chat'
+        assert urllib.request.urlopen(base + '/assets/site.js').read() == b'site'
+        assert request(base, '/../secret.txt')[0] == 404
+
+
 def test_binary_dxf_is_accepted_without_conversion_of_original(tmp_path):
     import ezdxf
     source = tmp_path / 'native.dxf'
