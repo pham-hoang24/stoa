@@ -105,6 +105,27 @@ def match_boxes(predicted, reference, threshold=0.5):
     return true_positive, len(predicted) - true_positive, len(reference) - true_positive
 
 
+def config_stamp() -> dict:
+    """Provider settings a report was produced under, so two reports can be compared fairly. Never includes a key."""
+    from .lanes.llm import DEFAULT_BASE, DEFAULT_MAX_REQUESTS, DEFAULT_MODEL
+    from .providers import configuration
+    c = configuration(DEFAULT_MODEL, DEFAULT_BASE, DEFAULT_MAX_REQUESTS)
+    return {k: c[k] for k in ("provider", "model", "fallback_provider", "timeout_seconds")}
+
+
+def compare(before: dict, after: dict) -> dict:
+    """Metric deltas between two reports, refusing mismatched splits or case sets."""
+    if before.get("split") != after.get("split"):
+        raise ValueError("Reports use different splits")
+    key = lambda r: (r["drawing"], r["target"])
+    if {key(r) for r in before["records"]} != {key(r) for r in after["records"]}:
+        raise ValueError("Reports cover different cases; deltas would be meaningless")
+    metrics = ("exact_count_accuracy", "precision", "recall", "abstentions", "inspection_requests")
+    delta = {m: None if before[m] is None or after[m] is None else after[m] - before[m] for m in metrics}
+    return {"split": before["split"], "cases": before["cases"], "delta": delta,
+            "config_before": before.get("config"), "config_after": after.get("config")}
+
+
 def run(manifest: dict, *, split="test", limit=5, request_budget=10, detect=None):
     if limit < 1 or not 1 <= request_budget <= 100:
         raise ValueError("Choose a positive case limit and a request budget from 1 to 100")
@@ -144,7 +165,7 @@ def run(manifest: dict, *, split="test", limit=5, request_budget=10, detect=None
                         "note": assessment.answer.note, "requests": assessment.requests,
                         "elapsed_ms": round((time.perf_counter() - start) * 1000, 2), "tp": tp, "fp": fp, "fn": fn})
     n = len(records)
-    return {"split": split, "cases": n, "answered": answered, "abstentions": n - answered,
+    return {"config": config_stamp() if detect is None else None, "split": split, "cases": n, "answered": answered, "abstentions": n - answered,
             "exact_count_matches": exact, "exact_count_accuracy": exact / n,
             "precision": true_positive / (true_positive + false_positive) if true_positive + false_positive else None,
             "recall": true_positive / (true_positive + false_negative) if true_positive + false_negative else None,
@@ -178,9 +199,14 @@ def main(argv=None):
     evaluate.add_argument("--limit", type=int, default=5)
     evaluate.add_argument("--max-requests", type=int, default=10)
     evaluate.add_argument("--output", required=True, type=Path)
+    diff = sub.add_parser("compare")
+    diff.add_argument("before", type=Path)
+    diff.add_argument("after", type=Path)
     args = parser.parse_args(argv)
     try:
-        if args.command == "init":
+        if args.command == "compare":
+            print(json.dumps(compare(json.loads(args.before.read_text()), json.loads(args.after.read_text())), indent=2))
+        elif args.command == "init":
             manifest = initialize(args.folder, args.project, args.split)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(manifest, indent=2))
