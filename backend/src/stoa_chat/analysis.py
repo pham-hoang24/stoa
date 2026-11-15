@@ -5,8 +5,10 @@ from .native import inventory
 
 
 TARGETS = {'wall': ('wall', 'walls', 'seinä', 'seinää', 'seinien'),
-           'door': ('door', 'doors', 'ovi', 'ovea', 'ovien'),
-           'window': ('window', 'windows', 'ikkuna', 'ikkunaa', 'ikkunoiden'),
+           'door': ('door', 'doors', 'ovi', 'ovea', 'ovien', 'ovet', 'tür', 'türe', 'türen', 'tuer', 'tuere', 'tueren',
+                    'porte', 'portes', 'porta'),
+           'window': ('window', 'windows', 'ikkuna', 'ikkunaa', 'ikkunoiden', 'ikkunat', 'fenster', 'fenêtre', 'fenêtres',
+                      'fenetre', 'fenetres', 'finestra', 'finestre'),
            'space': ('room', 'rooms', 'huone', 'huonetta'),
            'buildingstorey': ('storey', 'storeys', 'floor', 'floors', 'kerros', 'kerrosta'),
            'slab': ('slab', 'slabs'), 'line':('line','lines','viiva','viivaa'),
@@ -22,19 +24,49 @@ def question_kind(question):
     for kind, pattern in [
         ('volume', r'volume|tilavuu|m³|cubic\s+met(?:re|er)s?'),
         ('area', r'area|pinta.ala|m²|square\s+met(?:re|er)s?|neliömet'),
-        ('count', r'\bhow many\b|\bcount(?:s|ing)?\b(?!\s+as\b)|\bnumber\s+of\b|kuinka monta|montako|lukumäärä'),
+        ('count', r'\bhow many\b|\bcount(?:s|ing)?\b(?!\s+as\b)|\bnumber\s+of\b|kuinka monta|montako|lukumäärä'
+                  r'|\bwie viele\b|\banzahl\b|\bcombien\b|\bnombre de\b|\bquant[ie]\b|\bnumero di\b'),
         ('length', r'\b(?:length|long|width|wide|height|high|tall|distance|depth|deep|perimeter)\b|pitu|ympärys|levey|korkeu|etäisyy|syvyy')]:
         if re.search(pattern, q):
             return kind
     return 'text'
 
 
+# Words that do not narrow an unfiltered "how many doors/windows" question, in the five
+# question languages. Any other word (a room, a storey, "interior") needs interpretation.
+OPENING_COUNT_WORDS = {
+    'how', 'many', 'what', 'is', 'the', 'total', 'number', 'of', 'are', 'there', 'in', 'on', 'this', 'drawing', 'plan',
+    'sheet', 'floor', 'count', 'shown', 'drawn', 'do', 'you', 'see', 'can', 'all', 'here',
+    'wie', 'viele', 'gibt', 'es', 'sind', 'hat', 'der', 'die', 'das', 'dem', 'den', 'diesem', 'dieser', 'im', 'auf',
+    'plan', 'grundriss', 'insgesamt', 'anzahl', 'zeichnung',
+    'combien', 'de', 'y', 'a', 't', 'il', 'sur', 'ce', 'cette', 'le', 'la', 'les', 'dans', 'nombre', 'des', 'au', 'total',
+    'quante', 'quanti', 'ci', 'sono', 'nel', 'nella', 'questo', 'questa', 'pianta', 'disegno', 'numero', 'di', 'delle', 'dei',
+    'kuinka', 'monta', 'montako', 'on', 'tässä', 'piirustuksessa', 'kuvassa', 'pohjassa', 'yhteensä', 'lukumäärä'}
+
+
+def opening_answer(question, drawing, target, kind):
+    """Rule-based door/window counts from vector geometry; None when the rule cannot answer."""
+    if kind != 'count' or target not in {'door', 'window'} or drawing['format'] not in {'pdf', 'dxf'}:
+        return None
+    words = set(re.findall(r'[\w]+', question.casefold()))
+    if words - OPENING_COUNT_WORDS - set(TARGETS[target]):
+        return None
+    from .vector_counts import opening_count
+    try:
+        return opening_count(drawing, target)
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError, RuntimeError, OSError):
+        return None
+
+
 def native_answer(question, drawing, data, prior_target=None):
-    words = set(re.findall(r'[\wäöå]+', question.casefold()))
+    words = set(re.findall(r'[\w]+', question.casefold()))
     target = next((t for t, aliases in TARGETS.items() if words.intersection(aliases)), None)
     if not target and re.search(r'\b(its|their|them|those|niiden|niitä)\b', question.casefold()):
         target = prior_target
     kind = question_kind(question)
+    answer = opening_answer(question, drawing, target, kind)
+    if answer is not None:
+        return answer
     if kind == 'text' and re.fullmatch(r'(what (text|labels) (is|are) on this drawing|show (all )?(text|labels)|näytä teksti)\??', question.casefold().strip()):
         facts = [f for f in data['facts'] if f['kind'] == 'text']
         if facts:
@@ -138,7 +170,8 @@ class HybridAnswerer:
                 return abstain('Selected drawing contributions have incompatible quantities or units.')
             answer = {**answer,'value':'\n'.join(a['value'] for a in answers) if isinstance(answer['value'],str) else sum(a['value'] for a in answers),
                       'status':'estimate' if any(a['status']=='estimate' for a in answers) else 'proposal' if any(a['status']=='proposal' for a in answers) else 'supported',
-                      'review_status':'unreviewed' if any(a.get('review_status')=='unreviewed' for a in answers) else 'native',
+                      'review_status':'unreviewed' if any(a.get('review_status')=='unreviewed' for a in answers)
+                                       else 'rule_based' if any(a.get('review_status')=='rule_based' for a in answers) else 'native',
                       'evidence':[e for a in answers for e in a['evidence']],
                       'calculation':{'operation':'sum_contributions','calculations':[a.get('calculation') for a in answers]}}
             producers = [{'drawing_id':d['id'], **a['model_provenance']}

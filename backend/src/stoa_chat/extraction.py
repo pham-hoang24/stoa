@@ -53,11 +53,11 @@ RULES
 # (English and Finnish stems). They tell the model what the symbol looks like; they never
 # carry counts or positions.
 CONVENTIONS = [
-    (r'\bwindows?\b|\bikkun', 'A window symbol is a narrow rectangle of two or three thin parallel lines set into '
+    (r'\bwindows?\b|\bikkun|\bfenster|\bfen[eê]tre|\bfinestr', 'A window symbol is a narrow rectangle of two or three thin parallel lines set into '
      'the outer wall line, often lightly filled and slightly wider than the wall, about as long as a door is wide. '
      'Windows occur only on the outer edges of each floor outline. Box only the symbol itself, never a whole wall, '
      'room or coloured area. A window with several panes is one window.'),
-    (r'\bdoors?\b|\bov(?:i|ea|et|en|ia|ien|issa|eton|ella)\b', 'A door is a door leaf in a wall opening, usually a '
+    (r'\bdoors?\b|\bov(?:i|ea|et|en|ia|ien|issa|eton|ella)\b|\bt(?:ü|ue)r(?:e|en)?\b|\bportes?\b|\bporta\b', 'A door is a door leaf in a wall opening, usually a '
      'straight line with a quarter-circle swing arc; a sliding door is drawn as offset parallel lines in the opening. '
      'An opening without a leaf is not a door. Give each door one box around its leaf and arc.'),
     (r'\bstair|\bportai|\bportaa|\bporra', 'A staircase is a run of parallel treads, often with a walking-line arrow, '
@@ -258,6 +258,16 @@ def extract(context, catalogs, kind, *, _views=None, _region=False):
             elif any(max(p['width'], p['height']) > 1600 for p in drawing['pages']):
                 from .image_analysis import extract_details
                 return extract_details(context, catalogs, kind, extract)
+        elif drawing.get('format') == 'pdf' and kind == 'count' and len(drawing['pages']) == 1:
+            # A plan filling under half of a vector sheet is read from enlarged crops of its region.
+            from .render import vector_count_views
+            try:
+                region = vector_count_views(drawing)
+            except (ValueError, RuntimeError):
+                region = None
+            if region:
+                from .image_analysis import extract_small_count
+                return extract_small_count(context, catalogs, kind, extract, region=region)
     pages, images, native, required_coverage, ocr_records, view_images = {}, [], {}, [], [], {}
     for drawing, data in zip(context['drawings'], catalogs):
         object_facts = [{'id': 'object:' + o['id'], 'kind': 'object', 'value': 1, 'label': o['label'], 'native_type': o['type'], 'evidence': o['evidence']} for o in data['objects']]
@@ -431,6 +441,11 @@ def count_region(fact, page):
         or (crop[2] < ox + page['source_width'] and x1 >= page['width'] - .5)
         or (crop[3] < oy + page['source_height'] and y1 >= page['height'] - .5)):
         raise ValueError('Count region is clipped at a crop boundary')
+
+
+# A visual zero is the absence of detections, not a measurement: say so plainly.
+NO_DETECTIONS = ('The model detected none of the requested objects in its visual scan of the drawing; '
+                 'this zero is unverified and may be a missed detection, so check the drawing before relying on it.')
 
 
 BLANK_INK_FRACTION = .005   # a counted region with less dark ink than this is empty paper
@@ -747,6 +762,8 @@ def calculate(plan, pages, native, kind, drawings, required_coverage):
         unit = 'm²' if power == 2 else 'm'
     else:
         raise ValueError('Unsupported operation')
+    if explanation is None and operation == 'count' and not facts and visual:
+        explanation = NO_DETECTIONS
     if explanation is None:
         explanation = ('Counted distinct cited text markers, assuming one marker per object; verify the labels and this assumption before using the quantity.' if count_basis == 'text_markers'
                        else 'Deterministic calculation from cited extracted facts; visual interpretation requires review.' if visual else 'Calculated from cited native facts.')

@@ -126,7 +126,14 @@ def raster_views(drawing, page=1, scale=1):
                          'role':'overview' if tiled else 'page'}
     views=[(cv2.imencode('.png',overview)[1].tobytes(),overview_descriptor)]
     if not tiled:return views
-    sx,sy=metadata['width']/width,metadata['height']/height
+    return views+_detail_tiles(image,base,drawing,page,metadata['width']/width,metadata['height']/height,ox,oy)
+
+
+def _detail_tiles(image,base,drawing,page,sx,sy,ox,oy):
+    """Overlapping crops of an image whose pixel (x, y) is source point (ox + x*sx, oy + y*sy)."""
+    height,width=image.shape[:2]
+    xs,ys=tile_axes(width),tile_axes(height)
+    views=[]
     for row,y in enumerate(ys):
         for col,x in enumerate(xs):
             x1,y1=min(x+TILE_SIDE,width),min(y+TILE_SIDE,height)
@@ -140,3 +147,43 @@ def raster_views(drawing, page=1, scale=1):
                         'core_bbox':[left,top,right,bottom]}
             views.append((cv2.imencode('.png',image[y:y1,x:x1])[1].tobytes(),descriptor))
     return views
+
+
+def vector_count_views(drawing, page=1):
+    """Enlarged crops of the drawn region of a vector PDF page, for count questions.
+
+    A whole A3 sheet at 1600 pixels leaves the plan under half the frame and door swings a few
+    pixels wide. The region holding the plan (the main block of vector paths, see
+    vector_counts.content_region) is rendered at about COUNT_TILED_SIDE pixels and cut into the
+    same overlapping tiles as small rasters; transforms map tile pixels to page points.
+    Returns None when the page has no compact vector region worth enlarging."""
+    from .vector_counts import content_region
+    if drawing['format'] != 'pdf':
+        return None
+    metadata = next(p for p in drawing['pages'] if p['page'] == page)
+    with pymupdf.open(drawing['path']) as document:
+        source = document[page - 1]
+        if source.rotation:
+            return None
+        region = content_region(source)
+        if region is None:
+            return None
+        zoom = min(MAX_UPSCALE * 2, COUNT_TILED_SIDE / max(region.width, region.height))
+        if zoom < 1.5 * min(2, MAX_SIDE / max(source.rect.width, source.rect.height)):
+            return None   # the normal preview already shows the region nearly this large
+        pixmap = source.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=region, alpha=False)
+        image = cv2.imdecode(np.frombuffer(pixmap.tobytes('png'), dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return None
+    height, width = image.shape[:2]
+    sx, sy = region.width / width, region.height / height
+    base = {'drawing_id': drawing['id'], 'page': page, 'source_width': metadata['width'], 'source_height': metadata['height'],
+            'source_origin': [0, 0], 'source_units': metadata['units'], 'original_url': drawing['asset_url'],
+            'preview_url': drawing['asset_url'].replace('/assets/', '/previews/') + '/' + str(page)}
+    if max(width, height) <= MAX_SIDE:
+        descriptor = {**base, 'id': f'{drawing["id"]}:{page}:region', 'width': width, 'height': height,
+                      'transform': [sx, 0, 0, sy, region.x0, region.y0], 'role': 'page',
+                      'source_bbox': [region.x0, region.y0, region.x1, region.y1]}
+        return [(cv2.imencode('.png', image)[1].tobytes(), descriptor)], zoom, [region.x0, region.y0, region.x1, region.y1]
+    tiles = _detail_tiles(image, base, drawing, page, sx, sy, region.x0, region.y0)
+    return tiles, zoom, [region.x0, region.y0, region.x1, region.y1]

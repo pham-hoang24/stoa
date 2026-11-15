@@ -81,7 +81,7 @@ SCALE_MIN_BOXES=5
 MAX_AREA_RATIO=20
 
 
-def extract_small_count(context,catalogs,kind,extractor):
+def extract_small_count(context,catalogs,kind,extractor,region=None):
     """Count on a small raster from independent readings of overlapping enlarged tiles.
 
     Asked about the whole small sheet, the model guesses positions from the room layout; asked
@@ -91,24 +91,34 @@ def extract_small_count(context,catalogs,kind,extractor):
     read makes the whole count abstain."""
     from concurrent.futures import ThreadPoolExecutor
     drawing=context['drawings'][0]
-    side=max(drawing['pages'][0]['width'],drawing['pages'][0]['height'])
-    scale=min(MAX_UPSCALE,COUNT_TILED_SIDE/side)
-    try:
-        views=raster_views(drawing,scale=scale)
-    except (ValueError,RuntimeError) as exc:
-        return abstain(str(exc),'image_detail_scope')
-    tiles=views[1:] or views
+    if region is not None:
+        # A vector page: region = (tiles of the enlarged drawn region, zoom, region box in page points).
+        tiles,scale,box=region
+        method={'method':'enlarged_vector_region','region_bbox':[round(v,2) for v in box]}
+    else:
+        side=max(drawing['pages'][0]['width'],drawing['pages'][0]['height'])
+        scale=min(MAX_UPSCALE,COUNT_TILED_SIDE/side)
+        try:
+            views=raster_views(drawing,scale=scale)
+        except (ValueError,RuntimeError) as exc:
+            return abstain(str(exc),'image_detail_scope')
+        tiles=views[1:] or views
+        method={'method':'enlarged_tiles'}
     hidden={'role','core_bbox','source_bbox'}
     plain=[(png,{**{k:v for k,v in d.items() if k not in hidden},'role':'page'}) for png,d in tiles]
-    processing={'method':'enlarged_tiles','version':1,'scale':round(scale,3),'tile_side':TILE_SIDE,'overlap':TILE_OVERLAP,
+    processing={**method,'version':1,'scale':round(scale,3),'tile_side':TILE_SIDE,'overlap':TILE_OVERLAP,
                 'required_views':[d['id'] for _,d in plain],'completed_views':[],
                 'regions':[{'id':d['id'],'source_bbox':d.get('source_bbox',[0,0,d['source_width'],d['source_height']])} for _,d in tiles]}
 
+    # Region readings of a vector page see only their enlarged crop, as raster regions do: given the
+    # page's text facts (legend, title block, labels elsewhere) the model copies them back unboxed.
+    local=[{**c,'facts':[]} for c in catalogs] if region is not None else catalogs
+
     def read(view):
-        answer=extractor(context,catalogs,kind,_views=[view],_region=True)
+        answer=extractor(context,local,kind,_views=[view],_region=True)
         if answer.get('error')=='invalid_extraction':
             processing.setdefault('retried_views',[]).append(view[1]['id'])
-            answer=extractor(context,catalogs,kind,_views=[view],_region=True)
+            answer=extractor(context,local,kind,_views=[view],_region=True)
         return answer
     with ThreadPoolExecutor(min(4,len(plain))) as pool:
         answers=list(pool.map(read,plain))
@@ -146,6 +156,9 @@ def extract_small_count(context,catalogs,kind,extractor):
     if oversized:explanation+=(f' {len(oversized)} region(s) far larger than the other counted objects were left out as not being one of them; '
                                'check them before relying on the total.')
     if basis=='text_markers':explanation+=' The label count assumes one marker per object; verify that assumption.'
+    if not facts:
+        from .extraction import NO_DETECTIONS
+        explanation=NO_DETECTIONS+f' {len(tiles)} enlarged region(s) were read separately.'
     if not evidence:
         evidence=[e for a in answers for e in a['evidence'] if 'coverage' in e]
     return {**answers[0],'status':'estimate' if any(a['status']=='estimate' for a in answers) else 'proposal',
@@ -193,6 +206,9 @@ def extract_details(context,catalogs,kind,extractor,scale=1):
     processing['duplicates_removed']=duplicates
     explanation=f'Calculated from cited detections after processing all {len(details)} required image regions. The overview supplied context; visual interpretation remains unreviewed.'
     if basis=='text_markers':explanation+=' The label count assumes one marker per object; verify that assumption.'
+    if not facts:
+        from .extraction import NO_DETECTIONS
+        explanation=NO_DETECTIONS+f' All {len(details)} required image regions were read.'
     return {**answers[0],'status':'estimate' if any(a['status']=='estimate' for a in answers) else 'proposal',
             'value':len(facts),'evidence':evidence,'explanation':explanation,
             'calculation':{'operation':'count','facts':facts,'count_basis':basis,'duplicates_removed':duplicates},

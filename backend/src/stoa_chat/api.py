@@ -60,7 +60,17 @@ class Store:
         self.db.commit()
 
 
-def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES, landing_dir=None):
+def _hostname(host_header):
+    """Strip a trailing :port when present; leave bare hostnames unchanged."""
+    if host_header.startswith('[') and ']' in host_header:
+        return host_header[1:host_header.index(']')]
+    name, sep, maybe_port = host_header.rpartition(':')
+    if sep and maybe_port.isdigit():
+        return name
+    return host_header
+
+
+def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=DEFAULT_UPLOAD_BYTES, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=DEFAULT_IFC_UPLOAD_BYTES, landing_dir=None, allowed_hosts=()):
     """Create a local server; the caller owns serve_forever/shutdown/server_close."""
     upload_limits = {'default': max_upload_bytes, 'ifc': max_ifc_upload_bytes}
     if any(type(limit) is not int or limit <= 0 for limit in upload_limits.values()):
@@ -69,6 +79,7 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
     if answerer is None:
         from .analysis import HybridAnswerer
         answerer = HybridAnswerer()
+    public_hosts = {h for h in allowed_hosts if h}
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -115,7 +126,8 @@ def create_server(root, host='127.0.0.1', port=8092, answerer=None, max_upload_b
                 if origin and origin not in local_origins | set(allowed_origins):
                     raise ApiError(403, 'Browser origin is not allowed')
                 host_header = self.headers.get('Host', '')
-                if host_header not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
+                local_hosts = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+                if host_header not in local_hosts and host_header not in public_hosts and _hostname(host_header) not in public_hosts:
                     raise ApiError(403, 'Host is not allowed')
                 self.route()
             except ApiError as exc:

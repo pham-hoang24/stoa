@@ -23,8 +23,11 @@ and uploads unreferenced by other conversations.
 Chats and originals persist in `.cache/chat/` (SQLite plus content-addressed assets).
 Use `uv run stoa-chat --storage /path/to/local-data --port 8092` to choose another
 location, and `--frontend /path/to/frontend` to override the static app directory.
-Run one process per storage directory. This local prototype has no accounts or
-remote deployment configuration; it binds to `127.0.0.1`.
+Run one process per storage directory. This prototype has no accounts. Locally it
+binds to `127.0.0.1`; for Render (or any public host) use
+`uv run stoa-chat --host 0.0.0.0 --port $PORT`. The CLI also reads `PORT`,
+auto-allows `RENDER_EXTERNAL_HOSTNAME`, and accepts extra hosts via
+`--allowed-host` or `STOA_ALLOWED_HOSTS`.
 
 IFC uploads accept up to 512 MiB by default; other formats retain a 50 MiB limit.
 For larger models, use `uv run stoa-chat --max-ifc-upload-mib 1024` (1 GiB).
@@ -67,7 +70,7 @@ silent credential reuse or fallthrough. Explicit `--llm-provider modal` or
 `--llm-provider featherless` runs that provider directly without NVIDIA fallback.
 Restart the server when changing CLI or `.env` settings.
 
-Answers distinguish **native source support**, **unreviewed model proposals**,
+Answers distinguish **native source support**, **unreviewed model or rule-based proposals**,
 **estimates**, **clarification**, **abstention** and **analysis errors**. Model
 extraction supplies facts and regions; Python computes quantities. A quantity
 needs adequate evidence, units and scale, with height for volume. Multiple drawing

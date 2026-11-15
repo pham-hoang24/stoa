@@ -1,6 +1,6 @@
 # Local drawing chat backend
 
-Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=52428800, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=536870912)` returns stdlib ThreadingHTTPServer. Caller runs serve_forever/shutdown/server_close. New backend only, independent from legacy benchmark.
+Package `stoa_chat`, `create_server(storage_root, host='127.0.0.1', port=8092, answerer=None, max_upload_bytes=52428800, allowed_origins=(), static_dir=None, max_ifc_upload_bytes=536870912, landing_dir=None, allowed_hosts=())` returns stdlib ThreadingHTTPServer. Caller runs serve_forever/shutdown/server_close. New backend only, independent from legacy benchmark.
 
 - POST /api/chats JSON {title?} → 201 chat
 - GET /api/config → {upload_limits: {default: bytes, ifc: bytes}}; frontend validation uses these active limits.
@@ -76,7 +76,7 @@ The server stores chat JSON transactionally in SQLite and originals under SHA-25
 
 Default upload limits are 512 MiB for IFC (`max_ifc_upload_bytes`) and 50 MiB for other formats (`max_upload_bytes`). Set `stoa-chat --max-ifc-upload-mib 1024` to accept IFC models up to 1 GiB. Both limits must be positive byte counts; the CLI accepts a positive whole number of MiB. A larger filename-based size allowance does not bypass content validation. JSON requests are bounded to 1 MiB, questions to 10,000 characters, titles to 200 characters. PDF accepts 1–1000 accessible, unencrypted pages; image pixel limit is 80 million. SVG uses static element and inline presentation-style allowlists and disallows script, events, document declarations, active CSS and external resources. DXF accepts complete ASCII and binary drawings. Original coordinates are retained: raster pixels, PDF points, SVG viewBox including origin, or explicit width/height in user coordinates when no viewBox exists. Absolute SVG length units are converted to CSS pixels at 96 dpi; relative or omitted dimensions remain unresolved rather than inventing a viewport. PNG/JPEG header dimensions are bounded before allocating decoded pixels. IFC GlobalIds and DXF handles are included as `entity_ids`.
 
-Browser Host must be localhost or 127.0.0.1 with the current server port; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds only 127.0.0.1. This is a local prototype, with no authentication or remote deployment configuration.
+Browser Host must be localhost or 127.0.0.1 with the current server port, or a value in `allowed_hosts`; Origin must be same-origin unless explicitly allowlisted by `allowed_origins`. The default CLI binds `127.0.0.1:8092`. For Render: `uv run stoa-chat --host 0.0.0.0 --port $PORT` (PORT defaults from the environment; `RENDER_EXTERNAL_HOSTNAME` is allowlisted automatically). No authentication.
 
 Public HTTP coverage: 31 tests passed on 2026-11-14, including restart, deletion/shared assets, all formats, multipage PDF, question/follow-up/evidence, malformed requests and answers, provider exceptions, unsafe SVG, scope isolation, and frontend path isolation. Controlled analysis tests verify application behavior, not perception accuracy. No provider was called.
 
@@ -100,7 +100,7 @@ the normalized original, with 20% overlap.
 Count questions on images whose longest side is under 1,600 pixels are enlarged
 (cubic, at most 6x) to about 2,600 pixels and read as overlapping 1,400-pixel tiles,
 each sent as its own one-image request with short drawing conventions for the asked
-object (windows, doors, stairs; English or Finnish wording). Python keeps each
+object (windows, doors, stairs; English or Finnish wording, and German, French or Italian for doors and windows). Python keeps each
 detection only in the tile whose core holds its centre, counts a detection seen by two
 tiles once, and leaves out (and reports) boxes far larger than the other counted
 objects; one unreadable tile abstains (`image_processing.method` `enlarged_tiles`).
@@ -125,6 +125,21 @@ bound abstains explicitly;
 no crops or detections are silently omitted. Geometry and calibration from different
 views are converted to the original source frame before calculation. Other questions
 on smaller rasters, and counts on rasters of 1,600 to 3,000 pixels, keep the single-view
-path. PDF/SVG rendering and IFC behavior are
-unchanged in this milestone. OCR is delegated separately in issue #58; this milestone
+path. A count on a one-page vector PDF whose plan fills a small part of the sheet reads
+the region holding the drawn plan the same way, enlarged to about 2,600 pixels and tiled
+(`image_processing.method` `enlarged_vector_region`, boxes in page points). SVG rendering
+and IFC behavior are unchanged in this milestone.
+
+Unfiltered door counts on vector PDFs are answered from the page geometry, without a
+model: a door is a stroked quarter-circle arc with a straight leaf from its hinge,
+door-sized at the printed scale (or on paper without one), inside the plan (not across a
+sheet divider such as a legend strip, not part of a full-circle symbol); coincident arcs
+count once and two leaves meeting mid-opening count as one door. DXF door and window
+counts use layers whose names mean door or window (DOOR, TÜR, PORTE, FENSTER, ...): one
+door per quarter-circle arc, one window per closed outline, identical copies once; any
+other entity on such a layer that does not belong to an arc or outline leaves the
+question to the existing path. These answers are `proposal`s with `review_status`
+`rule_based` and the rule in `calculation.method`, one box per counted object. A page
+with no such geometry falls through instead of answering zero. A visual count of zero
+says that nothing was detected and that the zero is unverified. OCR is delegated separately in issue #58; this milestone
 does not require or automatically run an OCR engine.

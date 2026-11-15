@@ -128,6 +128,7 @@ def test_invalid_requests_and_provider_failure_preserve_history(tmp_path):
     with running(tmp_path, broken, max_upload_bytes=1000) as base:
         path = '/chats/' + request(base, '/chats', 'POST', {})[1]['id']
         assert request(base, '/chats', 'POST', {}, {'Origin': 'https://evil.example'})[0] == 403
+        assert request(base, '/chats', 'POST', {}, {'Host': 'evil.example'})[0] == 403
         assert request(base, '/chats', 'POST', b'{')[0] == 400
         assert request(base, '/chats', 'POST', [])[0] == 400
         assert request(base, path + '/uploads?filename=x.png', 'POST', b'x' * 1001)[0] == 413
@@ -141,6 +142,23 @@ def test_invalid_requests_and_provider_failure_preserve_history(tmp_path):
     with running(tmp_path) as base:
         assert request(base, path + '/questions', 'POST', {'question': 'Again'})[1]['answer']['status'] == 'abstain'
         assert len(request(base, path)[1]['messages']) == 4
+
+
+def test_allowed_hosts_accept_public_host_and_origin(tmp_path):
+    with running(
+        tmp_path,
+        allowed_hosts=('stoa.example',),
+        allowed_origins=('https://stoa.example',),
+    ) as base:
+        status, chat = request(
+            base,
+            '/chats',
+            'POST',
+            {},
+            {'Host': 'stoa.example', 'Origin': 'https://stoa.example'},
+        )
+        assert status == 201
+        assert chat['id']
 
 
 def test_fabricated_evidence_or_malformed_answers_become_saved_abstains(tmp_path):
